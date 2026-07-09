@@ -27,6 +27,22 @@ function fmtShare(s) {
   return `${s.samsung}/${s.total} (${pct})`;
 }
 
+// Watchdog: no single scrape step may hang the whole run. Sites that stall
+// (WAFs throttling datacenter IPs can hold connections for a very long time)
+// fail with a clear error after this budget and the run moves on.
+const STEP_TIMEOUT_MS = Number(process.env.SCRAPE_STEP_TIMEOUT_MIN || 10) * 60 * 1000;
+
+function withTimeout(promise, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} exceeded ${Math.round(STEP_TIMEOUT_MS / 60000)} min watchdog`)),
+      STEP_TIMEOUT_MS
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function runOnce(siteFilter) {
   const sites = siteFilter && siteFilter.length ? SITES.filter((s) => siteFilter.includes(s.id)) : SITES;
 
@@ -49,7 +65,10 @@ async function runOnce(siteFilter) {
 
     process.stdout.write(`[run] ${site.name} … `);
     try {
-      const { hero, promo, tiles, screenshotPath } = await countSamsungBanners(site);
+      const { hero, promo, tiles, screenshotPath } = await withTimeout(
+        countSamsungBanners(site),
+        `${site.name} banner scrape`
+      );
       console.log(
         `hero ${hero.count}/${hero.total} · promo ${promo.count}/${promo.total} · tiles ${tiles.count}/${tiles.total}`
       );
@@ -64,7 +83,7 @@ async function runOnce(siteFilter) {
       if (site.devices) {
         process.stdout.write(`        device-page share … `);
         try {
-          deviceShare = await measureDeviceShare(site);
+          deviceShare = await withTimeout(measureDeviceShare(site), `${site.name} device share`);
           console.log(`${fmtShare(deviceShare)} Samsung across ${deviceShare.pages} page(s)`);
         } catch (err) {
           console.log(`FAILED — ${err.message}`);
@@ -74,7 +93,7 @@ async function runOnce(siteFilter) {
         const termLabel = (site.search.terms || [site.search.term || 'phones']).join('", "');
         process.stdout.write(`        search "${termLabel}" share … `);
         try {
-          searchShare = await measureSearchShare(site);
+          searchShare = await withTimeout(measureSearchShare(site), `${site.name} search share`);
           console.log(`${fmtShare(searchShare)} Samsung${searchShare.kind === 'facet' ? ' (brand facet)' : ''}`);
           if (Array.isArray(searchShare.results) && searchShare.results.length > 1) {
             for (const r of searchShare.results) {
@@ -92,11 +111,14 @@ async function runOnce(siteFilter) {
       if (process.env.ANTHROPIC_API_KEY) {
         process.stdout.write(`        AI cross-check … `);
         try {
-          vision = await visionCheck(site, screenshotPath, {
-            hero: hero.count,
-            promo: promo.count,
-            tiles: tiles.count,
-          });
+          vision = await withTimeout(
+            visionCheck(site, screenshotPath, {
+              hero: hero.count,
+              promo: promo.count,
+              tiles: tiles.count,
+            }),
+            `${site.name} AI cross-check`
+          );
           console.log(
             `hero ${vision.hero} · promo ${vision.promo} · tiles ${vision.tiles} — ${vision.agrees ? 'agrees' : 'differs'} (DOM total ${hero.count + promo.count + tiles.count})`
           );

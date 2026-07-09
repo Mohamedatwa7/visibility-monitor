@@ -120,7 +120,9 @@ async function visionCheck(site, screenshotPath, domCounts) {
   }
 
   const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic();
+  // Bounded: a slow/hanging API call must not stall the pipeline (the run
+  // watchdog is the backstop; this keeps the normal path snappy).
+  const client = new Anthropic({ timeout: 120000, maxRetries: 1 });
 
   const imageData = await preparedImage(screenshotPath);
 
