@@ -1,0 +1,46 @@
+name: Daily Samsung visibility check
+
+on:
+  schedule:
+    - cron: '0 5 * * *' # 09:00 Asia/Dubai (UTC+4)
+  workflow_dispatch: # manual runs + the dashboard's "Run check now" button
+
+concurrency:
+  group: visibility-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run visibility check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_FROM: ${{ secrets.ALERT_FROM }}
+        run: node banner-monitor/run.js
+
+      # Screenshots are uploaded to Supabase Storage by the run itself; keep
+      # the raw artifacts too for 7 days as a debugging fallback.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: banner-monitor/screenshots/*.png
+          retention-days: 7

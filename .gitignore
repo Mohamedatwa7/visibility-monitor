@@ -1,0 +1,11 @@
+node_modules/
+.env
+.vercel/
+banner-monitor/data/
+banner-monitor/screenshots/
+npm-debug.log*
+*.log
+tmp-*.js
+
+# separate local Python project — not part of the deployed monitor
+samsung-visibility-audit/
