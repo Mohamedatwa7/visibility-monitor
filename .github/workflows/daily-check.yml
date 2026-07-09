@@ -12,7 +12,9 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Gulf sites respond much slower to US datacenter IPs than to local
+    # traffic — a cloud run takes far longer than the ~7 min it takes locally.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
