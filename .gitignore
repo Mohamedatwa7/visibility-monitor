@@ -1,6 +1,8 @@
 node_modules/
 .env
 .vercel/
+# local scheduled-task runner — contains secrets
+run-sharafdg-cloud.cmd
 banner-monitor/data/
 banner-monitor/screenshots/
 npm-debug.log*

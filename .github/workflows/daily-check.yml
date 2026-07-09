@@ -36,7 +36,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ALERT_FROM: ${{ secrets.ALERT_FROM }}
-        run: node banner-monitor/run.js
+        # sharafdg is NOT scraped here: its Cloudflare challenges datacenter
+        # IPs. It runs from a local machine via Task Scheduler instead
+        # (run-sharafdg-cloud.cmd), writing to the same Supabase.
+        run: node banner-monitor/run.js "e&" du
 
       # Screenshots are uploaded to Supabase Storage by the run itself; keep
       # the raw artifacts too for 7 days as a debugging fallback.
