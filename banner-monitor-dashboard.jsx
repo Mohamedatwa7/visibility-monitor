@@ -617,20 +617,6 @@ export default function BannerMonitorDashboard() {
 
               <div style={S.cardFooter}>
                 <a href={s.url} target="_blank" rel="noreferrer" style={S.link}>Open site ↗</a>
-                {s.screenshotPath && (
-                  <a
-                    href={
-                      /^https?:\/\//.test(s.screenshotPath)
-                        ? s.screenshotPath // cloud mode: stored as a public URL
-                        : `${API_BASE}/screenshots/${encodeURIComponent(s.screenshotPath.split(/[\\/]/).pop())}`
-                    }
-                    target="_blank"
-                    rel="noreferrer"
-                    style={S.link}
-                  >
-                    Screenshot ↗
-                  </a>
-                )}
                 {s.assets && (s.assets.hero.length || s.assets.promo.length || s.assets.tiles.length) > 0 && (
                   <a
                     href="#assets"
