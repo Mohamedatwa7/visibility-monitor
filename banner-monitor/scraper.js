@@ -271,7 +271,7 @@ function collectCandidatesInPage({ containerSource, containerFlags }) {
 // "count dropped" alert). NOTE: this is best-effort — sophisticated JA3/TLS
 // fingerprinting can still block us and would need a real browser/proxy.
 const BLOCK_RE =
-  /request rejected|the requested url was rejected|has been blocked|access denied|attention required|verify you are (?:a )?human|are you a robot|unusual traffic|pardon the interruption/i;
+  /request rejected|the requested url was rejected|has been blocked|access denied|attention required|verify you are (?:a )?human|verif(?:y|ies) (?:that )?you are (?:not )?a? ?(?:bot|human)|are you a robot|unusual traffic|pardon the interruption|performing security verification|security service to protect|checking your browser|just a moment/i;
 
 class BlockedError extends Error {
   constructor(msg) {
