@@ -363,6 +363,11 @@ async function countSamsungBanners(site) {
     // tiles into one).
     const ICON_RE =
       /(\/svg-icons\/|\/icons\/|\bicon[-_]|chevron|arrow|sprite|favicon|\.svg(?:$|\?)|placeholder|[-_]gray\.(?:jpg|jpeg|png)|\bblank\.(?:gif|png)|\b1x1\.)/i;
+    // Analytics/ad tracking pixels are <img> elements but not placements —
+    // their query strings also poison brand detection (bing's "&lg=en-AE"
+    // read as LG). Drop them before any classification.
+    const TRACKER_RE =
+      /bat\.bing\.com|google-analytics|googletagmanager|doubleclick\.net|googleadservices|facebook\.com\/tr\b|connect\.facebook|hotjar|clarity\.ms|criteo|\/beacon|\/pixel\b|snr\.snapchat|tiktok\.com\/i18n|analytics\./i;
     const COUNTER_RE = /^\s*\d+\s*\/\s*\d+\s*$/;
 
     // Placements are classified into THREE sections (user-defined 2026-07-08):
@@ -378,6 +383,7 @@ async function countSamsungBanners(site) {
     const byKey = new Map(); // key -> {src, alt, href, w, tile, samsung}
     for (const c of candidates) {
       if (c.inChrome) continue; // skip nav/header/footer/mega-menu
+      if (TRACKER_RE.test(c.src || '') || TRACKER_RE.test(c.href || '')) continue;
 
       // The candidate's own creative image (ignore icon/placeholder assets).
       let imageUrl = c.src || c.bg || '';

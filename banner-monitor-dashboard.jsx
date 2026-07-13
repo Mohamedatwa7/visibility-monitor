@@ -283,46 +283,84 @@ function samsungRank(map) {
   return better + 1;
 }
 
-// One stacked brand-share bar with a Samsung share/rank readout.
-function BrandBar({ title, data }) {
+// Ranked brand leaderboard: one row per brand with its own bar, name, and
+// numbers inline — readable without any color legend.
+function Leaderboard({ title, data, subtitle }) {
   const S = styles;
-  const entries = Object.entries(data || {}).sort((a, b) => {
-    if (a[0] === 'other') return 1;
-    if (b[0] === 'other') return -1;
-    return b[1] - a[1];
-  });
-  const total = entries.reduce((n, [, v]) => n + v, 0);
-  if (!total) return null;
-  const samsungN = (data && data.samsung) || 0;
-  const pct = Math.round((samsungN / total) * 1000) / 10;
-  const rank = samsungRank(data);
+  const entries = Object.entries(data || {}).filter(([b]) => b !== 'other');
+  const otherN = (data && data.other) || 0;
+  const total = entries.reduce((n, [, v]) => n + v, 0) + otherN;
+  if (!total || !entries.length) return null;
+  entries.sort((a, b) => b[1] - a[1]);
+  const top = entries.slice(0, 5);
+  const restN = entries.slice(5).reduce((n, [, v]) => n + v, 0) + otherN;
+  const max = top[0][1];
+
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={S.brandBarHead}>
-        <span style={S.brandBarTitle}>{title}</span>
-        <span style={S.brandBarVal}>
-          Samsung {samsungN}/{total} ({pct}%){rank ? ` · #${rank}` : ''}
-        </span>
+    <div style={{ marginBottom: 14 }}>
+      <div style={S.lbHead}>
+        <span style={S.lbTitle}>{title}</span>
+        {subtitle && <span style={S.lbSub}>{subtitle}</span>}
       </div>
-      <div style={S.brandBarTrack} title={entries.map(([b, n]) => `${brandMeta(b).label}: ${n}`).join('  ·  ')}>
-        {entries.map(([b, n]) => (
-          <div
-            key={b}
-            style={{
-              width: `${(n / total) * 100}%`,
-              background: brandMeta(b).color,
-              opacity: b === 'other' ? 0.5 : 1,
-            }}
-            title={`${brandMeta(b).label}: ${n} (${Math.round((n / total) * 1000) / 10}%)`}
-          />
-        ))}
-      </div>
+      {top.map(([b, n], i) => {
+        const meta = brandMeta(b);
+        const pct = Math.round((n / total) * 1000) / 10;
+        const isSamsung = b === 'samsung';
+        return (
+          <div key={b} style={{ ...S.lbRow, ...(isSamsung ? S.lbRowSamsung : {}) }}>
+            <span style={S.lbRank}>{i + 1}</span>
+            <span style={{ ...S.lbBrand, fontWeight: isSamsung ? 800 : 600 }}>{meta.label}</span>
+            <div style={S.lbBarTrack}>
+              <div style={{ ...S.lbBarFill, width: `${(n / max) * 100}%`, background: meta.color }} />
+            </div>
+            <span style={{ ...S.lbNum, fontWeight: isSamsung ? 800 : 600 }}>
+              {n} <span style={S.lbPct}>({pct}%)</span>
+            </span>
+          </div>
+        );
+      })}
+      {restN > 0 && (
+        <div style={{ ...S.lbRow, opacity: 0.55 }}>
+          <span style={S.lbRank}>·</span>
+          <span style={S.lbBrand}>Others</span>
+          <div style={S.lbBarTrack}>
+            <div style={{ ...S.lbBarFill, width: `${Math.min((restN / max) * 100, 100)}%`, background: '#cbd5e1' }} />
+          </div>
+          <span style={S.lbNum}>{restN}</span>
+        </div>
+      )}
     </div>
   );
 }
 
-// Per-site competition panel: placements, catalog, search, and division
-// head-to-heads, all as stacked brand bars.
+// One-line division summary: Samsung's rank + share, and who to watch.
+function DivisionLine({ label, brands }) {
+  const S = styles;
+  const entries = Object.entries(brands || {}).filter(([b]) => b !== 'other');
+  const total = entries.reduce((n, [, v]) => n + v, 0);
+  if (!total) return null;
+  entries.sort((a, b) => b[1] - a[1]);
+  const rank = samsungRank(brands);
+  const samsungN = brands.samsung || 0;
+  const pct = Math.round((samsungN / total) * 1000) / 10;
+  const rival = entries.find(([b]) => b !== 'samsung');
+  const rivalTxt = rival ? `${brandMeta(rival[0]).label} ${rival[1]}` : '';
+  const good = rank === 1;
+
+  return (
+    <div style={S.divLine}>
+      <span style={S.divName}>{label}</span>
+      <span style={{ ...S.divRankChip, ...(good ? S.chipUp : S.chipWarn) }}>
+        {rank ? `#${rank}` : '—'}
+      </span>
+      <span style={S.divDetail}>
+        Samsung {samsungN}/{total} ({pct}%){rivalTxt ? ` · ${good ? 'next' : 'leader'}: ${rivalTxt}` : ''}
+      </span>
+    </div>
+  );
+}
+
+// Per-site competition panel: brand leaderboards per metric + division lines.
 function CompetitionCard({ site }) {
   const S = styles;
   const c = site.competition;
@@ -338,43 +376,19 @@ function CompetitionCard({ site }) {
   return (
     <div style={S.card}>
       <div style={S.siteName}>{site.name}</div>
-      <div style={{ marginTop: 10 }}>
-        <BrandBar title="Homepage placements" data={placements} />
-        {c.devices && <BrandBar title="Device catalog (first 5 pages)" data={c.devices} />}
-        {c.search && <BrandBar title="Search results" data={c.search} />}
+      <div style={{ marginTop: 12 }}>
+        <Leaderboard title="Homepage placements" data={placements} />
+        {c.devices && <Leaderboard title="Device catalog" subtitle="first 5 pages" data={c.devices} />}
+        {c.search && <Leaderboard title="Search results" subtitle="common phone searches" data={c.search} />}
       </div>
       {divisions.length > 0 && (
-        <div style={{ marginTop: 6 }}>
-          <div style={S.divisionHead}>By division</div>
+        <div style={{ marginTop: 4 }}>
+          <div style={S.divisionHead}>Samsung's position by division</div>
           {divisions.map(([div, brands]) => (
-            <BrandBar key={div} title={DIVISION_LABELS[div] || div} data={brands} />
+            <DivisionLine key={div} label={DIVISION_LABELS[div] || div} brands={brands} />
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function CompetitionLegend({ sites }) {
-  const S = styles;
-  const present = new Set();
-  for (const s of sites) {
-    const c = s.competition;
-    if (!c) continue;
-    for (const m of [c.hero, c.promo, c.tiles, c.devices, c.search]) {
-      for (const b of Object.keys(m || {})) present.add(b);
-    }
-  }
-  const list = Array.from(present).filter((b) => b !== 'other');
-  list.sort((a, b) => (a === 'samsung' ? -1 : b === 'samsung' ? 1 : a.localeCompare(b)));
-  if (!list.length) return null;
-  return (
-    <div style={{ ...S.legendRow, flexWrap: 'wrap', marginBottom: 12 }}>
-      {list.map((b) => (
-        <span key={b} style={S.legendItem}>
-          <i style={{ ...S.legendDot, background: brandMeta(b).color }} /> {brandMeta(b).label}
-        </span>
-      ))}
     </div>
   );
 }
@@ -796,7 +810,6 @@ export default function BannerMonitorDashboard() {
               Samsung vs competing brands on each retailer — share of placements, catalog, and search
             </span>
           </div>
-          <CompetitionLegend sites={sites} />
           <div style={S.grid}>
             {sites.map((s) => (
               <CompetitionCard key={s.id} site={s} />
@@ -1011,10 +1024,21 @@ const styles = {
   legendRow: { display: 'flex', gap: 14, alignItems: 'center', marginTop: 4 },
   sectionHead: { display: 'flex', alignItems: 'baseline', gap: 12, margin: '4px 0 10px', flexWrap: 'wrap' },
   sectionSub: { color: '#94a3b8', fontSize: 12 },
-  brandBarHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 },
-  brandBarTitle: { fontSize: 12, fontWeight: 700, color: '#334155' },
-  brandBarVal: { fontSize: 11, color: '#64748b', fontWeight: 600 },
-  brandBarTrack: { display: 'flex', height: 14, borderRadius: 999, overflow: 'hidden', background: '#f1f5f9' },
+  lbHead: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 },
+  lbTitle: { fontSize: 13, fontWeight: 700, color: '#334155' },
+  lbSub: { fontSize: 11, color: '#94a3b8' },
+  lbRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 6px', borderRadius: 6 },
+  lbRowSamsung: { background: '#eef4ff' },
+  lbRank: { width: 14, textAlign: 'right', fontSize: 11, color: '#94a3b8', fontWeight: 700, flexShrink: 0 },
+  lbBrand: { width: 68, fontSize: 12, color: '#0f172a', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  lbBarTrack: { flex: 1, height: 9, borderRadius: 999, background: '#f1f5f9', overflow: 'hidden' },
+  lbBarFill: { height: '100%', borderRadius: 999 },
+  lbNum: { width: 74, textAlign: 'right', fontSize: 12, color: '#0f172a', flexShrink: 0 },
+  lbPct: { color: '#94a3b8', fontSize: 11, fontWeight: 500 },
+  divLine: { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid #f8fafc' },
+  divName: { width: 118, fontSize: 12, fontWeight: 700, color: '#334155', flexShrink: 0 },
+  divRankChip: { flexShrink: 0 },
+  divDetail: { fontSize: 11.5, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   divisionHead: {
     fontSize: 11,
     fontWeight: 700,

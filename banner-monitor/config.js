@@ -179,13 +179,16 @@ const BRANDS = [
   { id: 'honor', label: 'Honor', regex: /\bhonor\b|magic\s?v?\d/i },
   { id: 'huawei', label: 'Huawei', regex: /huawei|\bpura\s?\d|\bmate\s?(?:x?\d|pad|book)/i },
   { id: 'oppo', label: 'Oppo', regex: /\boppo\b|\breno\s?\d/i },
-  { id: 'vivo', label: 'vivo', regex: /\bvivo\b/i },
+  { id: 'vivo', label: 'vivo', regex: /\bvivo\b(?!book)/i }, // vivobook = Asus
   { id: 'realme', label: 'realme', regex: /realme/i },
   { id: 'nothing', label: 'Nothing', regex: /nothing[\s-]?phone|\bcmf\b/i },
   { id: 'google', label: 'Google', regex: /\bpixel\s?\d|google\s?pixel/i },
   { id: 'infinix', label: 'Infinix', regex: /infinix/i },
   { id: 'tecno', label: 'Tecno', regex: /\btecno\b/i },
-  { id: 'lg', label: 'LG', regex: /\blg\b/i },
+  // "lg" is a hazardous token: CSS grid classes (col-lg-6), URL size markers
+  // and language params (&lg=en) all contain it at word boundaries. Require
+  // clean non-hyphen/equals context, or an explicit LG product word.
+  { id: 'lg', label: 'LG', regex: /(?<![\w-])lg(?![\w=-])|lg[\s-](?:tv|oled|qled|nanocell|gram|electronics|washer|refrigerator|styler|soundbar|xboom)/i },
   { id: 'tcl', label: 'TCL', regex: /\btcl\b/i },
   { id: 'hisense', label: 'Hisense', regex: /hisense/i },
   { id: 'sony', label: 'Sony', regex: /\bsony\b|bravia|playstation|\bps5\b/i },
