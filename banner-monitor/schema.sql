@@ -22,8 +22,13 @@ create table if not exists banner_runs (
   tile_total      integer,
   -- promo cards (mid-size promotional boxes); count/banner_total hold HERO banners
   promo_count     integer,
-  promo_total     integer
+  promo_total     integer,
+  -- competition analysis: {hero,promo,tiles,devices,search: {brand: count}, divisions: {div: {brand: count}}}
+  competition     jsonb
 );
+
+-- Upgrading an existing deployment (run in the Supabase SQL editor):
+--   alter table banner_runs add column if not exists competition jsonb;
 
 -- Upgrading an existing deployment:
 --   alter table banner_runs add column if not exists device_share jsonb;

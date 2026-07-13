@@ -163,6 +163,72 @@ const BROWSER = {
 // Regex used to recognise carousel/banner/promo containers in the DOM.
 const CONTAINER_REGEX = /swiper|slick|carousel|slider|hero|banner|promo|campaign/i;
 
+/* ------------------------------------------------------------------ *
+ * Competition analysis (researched 2026-07: Statista/Omdia — Samsung
+ * ~34% ME smartphone share, Honor #2 shipments and fastest-growing,
+ * then Xiaomi/Transsion/Apple; TVs: Samsung vs TCL/Hisense/LG/Sony;
+ * appliances: LG/Bosch/Hisense/Midea/Haier).
+ *
+ * Order matters: first matching brand wins, so more-specific product
+ * names sit on the brand that owns them.
+ * ------------------------------------------------------------------ */
+const BRANDS = [
+  { id: 'samsung', label: 'Samsung', regex: DEFAULT_REGEX },
+  { id: 'apple', label: 'Apple', regex: /\bapple\b|iphone|ipad\b|macbook|airpods|imac\b/i },
+  { id: 'xiaomi', label: 'Xiaomi', regex: /xiaomi|redmi|\bpoco\b/i },
+  { id: 'honor', label: 'Honor', regex: /\bhonor\b|magic\s?v?\d/i },
+  { id: 'huawei', label: 'Huawei', regex: /huawei|\bpura\s?\d|\bmate\s?(?:x?\d|pad|book)/i },
+  { id: 'oppo', label: 'Oppo', regex: /\boppo\b|\breno\s?\d/i },
+  { id: 'vivo', label: 'vivo', regex: /\bvivo\b/i },
+  { id: 'realme', label: 'realme', regex: /realme/i },
+  { id: 'nothing', label: 'Nothing', regex: /nothing[\s-]?phone|\bcmf\b/i },
+  { id: 'google', label: 'Google', regex: /\bpixel\s?\d|google\s?pixel/i },
+  { id: 'infinix', label: 'Infinix', regex: /infinix/i },
+  { id: 'tecno', label: 'Tecno', regex: /\btecno\b/i },
+  { id: 'lg', label: 'LG', regex: /\blg\b/i },
+  { id: 'tcl', label: 'TCL', regex: /\btcl\b/i },
+  { id: 'hisense', label: 'Hisense', regex: /hisense/i },
+  { id: 'sony', label: 'Sony', regex: /\bsony\b|bravia|playstation|\bps5\b/i },
+  { id: 'bosch', label: 'Bosch', regex: /\bbosch\b/i },
+  { id: 'beko', label: 'Beko', regex: /\bbeko\b/i },
+  { id: 'midea', label: 'Midea', regex: /\bmidea\b/i },
+  { id: 'haier', label: 'Haier', regex: /\bhaier\b/i },
+  { id: 'dyson', label: 'Dyson', regex: /\bdyson\b/i },
+  { id: 'jbl', label: 'JBL', regex: /\bjbl\b/i },
+];
+
+// Product divisions — checked in order; first match wins, so accessories
+// (watch/buds) are recognised before the generic phone patterns.
+const DIVISIONS = [
+  { id: 'tv', label: 'TV & AV', regex: /\btvs?\b|television|qled|oled|bravia|soundbar|projector/i },
+  {
+    id: 'appliance',
+    label: 'Home Appliances',
+    regex: /washer|washing machine|dryer|refrigerator|fridge|freezer|dishwasher|microwave|\boven\b|vacuum|air\s?(?:conditioner|fryer|purifier)|robot clean/i,
+  },
+  { id: 'wearable', label: 'Wearables', regex: /watch|\bband\s?\d|fitness track/i },
+  { id: 'audio', label: 'Audio', regex: /buds|earbuds|earphone|headphone|airpods|speaker/i },
+  { id: 'computing', label: 'Tablets & PCs', regex: /laptop|notebook|macbook|tablet|ipad|\btab\b|matepad|chromebook/i },
+  {
+    id: 'mobile',
+    label: 'Smartphones',
+    regex: /phone|galaxy|iphone|\bfold|\bflip|redmi|\bpoco\b|\breno\s?\d|pixel|\bpura\s?\d|\bmate\s?x?\d|magic\s?v?\d|smartphone|\b5g\b/i,
+  },
+];
+
+// Classify a text blob (image URL + alt + href + caption) to a brand/division.
+function brandOf(text) {
+  if (!text) return 'other';
+  for (const b of BRANDS) if (b.regex.test(text)) return b.id;
+  return 'other';
+}
+
+function divisionOf(text) {
+  if (!text) return 'other';
+  for (const d of DIVISIONS) if (d.regex.test(text)) return d.id;
+  return 'other';
+}
+
 // Alerting behaviour: 'change' = alert on any count change, 'drop' = only when count falls.
 const ALERT_ON = (process.env.ALERT_ON || 'change').toLowerCase() === 'drop' ? 'drop' : 'change';
 
@@ -173,6 +239,10 @@ function getRegexFor(site) {
 module.exports = {
   SITES,
   DISABLED_SITES,
+  BRANDS,
+  DIVISIONS,
+  brandOf,
+  divisionOf,
   DEFAULT_REGEX,
   CONTAINER_REGEX,
   BROWSER,

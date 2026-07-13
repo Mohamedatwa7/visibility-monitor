@@ -22,7 +22,7 @@
 const path = require('path');
 const fs = require('fs');
 const { chromium } = require('playwright');
-const { BROWSER, CONTAINER_REGEX, getRegexFor } = require('./config');
+const { BROWSER, CONTAINER_REGEX, getRegexFor, brandOf, divisionOf } = require('./config');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
@@ -426,7 +426,7 @@ async function countSamsungBanners(site) {
         (site.matchBlockText && c.blockText ? c.blockText.slice(0, 100) : '') ||
         (text ? text.slice(0, 100) : '');
 
-      const rec = byKey.get(key) || { key, src: '', alt: '', href: '', w: 0, ownW: 0, tile: false, samsung: false };
+      const rec = byKey.get(key) || { key, src: '', alt: '', href: '', w: 0, ownW: 0, tile: false, samsung: false, sig: '' };
       if (!rec.src && imageUrl) rec.src = imageUrl;
       if (!rec.href && c.href) rec.href = c.href;
       if (!rec.alt && label) rec.alt = label;
@@ -436,6 +436,9 @@ async function countSamsungBanners(site) {
       if (imageUrl) rec.ownW = Math.max(rec.ownW, c.ownW || 0);
       rec.tile = rec.tile || isTile;
       rec.samsung = rec.samsung || isSamsung;
+      // Accumulated signal text for brand/division classification (competition
+      // analysis) — same signals the Samsung test reads.
+      rec.sig = `${rec.sig} ${ownSignals.filter(Boolean).join(' ')}`.slice(0, 600);
       byKey.set(key, rec);
     }
 
@@ -445,16 +448,42 @@ async function countSamsungBanners(site) {
     const HERO_MIN_OWN_W = site.heroMinOwnWidth || 350;
     const classOf = (r) =>
       r.tile ? 'tile' : r.w >= HERO_MIN_W && (r.ownW >= HERO_MIN_OWN_W || !r.src) ? 'hero' : 'promo';
+
+    // Competition analysis: classify every placement to a brand. The Samsung
+    // flag stays authoritative for our own numbers (it uses per-site tuned
+    // signals); brandOf covers the rest of the market.
+    for (const r of recs) {
+      r.brand = r.samsung ? 'samsung' : brandOf(r.sig);
+      r.division = divisionOf(r.sig);
+    }
+
+    const brandTally = (list) => {
+      const out = {};
+      for (const r of list) out[r.brand] = (out[r.brand] || 0) + 1;
+      return out;
+    };
+
     const section = (cls) => {
       const all = recs.filter((r) => classOf(r) === cls);
       const matches = all.filter((r) => r.samsung).map(({ key, src, alt, href }) => ({ key, src, alt, href }));
-      return { count: matches.length, total: all.length, matches };
+      return { count: matches.length, total: all.length, matches, brands: brandTally(all) };
     };
+
+    // Division breakdown across ALL placements: division -> brand -> count.
+    // 'other'-brand placements are skipped (site chrome, unbranded promos) so
+    // divisions compare identified brands head-to-head.
+    const divisions = {};
+    for (const r of recs) {
+      if (r.brand === 'other' || r.division === 'other') continue;
+      divisions[r.division] = divisions[r.division] || {};
+      divisions[r.division][r.brand] = (divisions[r.division][r.brand] || 0) + 1;
+    }
 
     return {
       hero: section('hero'),
       promo: section('promo'),
       tiles: section('tile'),
+      divisions,
       screenshotPath,
     };
   } finally {

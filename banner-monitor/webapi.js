@@ -71,6 +71,7 @@ router.get('/api/sites', async (_req, res) => {
           : { hero: [], promo: [], tiles: [] },
         deviceShare: latest ? latest.device_share || null : null,
         searchShare: latest ? latest.search_share || null : null,
+        competition: latest ? latest.competition || null : null,
         history: runs
           .slice()
           .reverse()

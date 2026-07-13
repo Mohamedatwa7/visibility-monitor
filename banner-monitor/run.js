@@ -65,7 +65,7 @@ async function runOnce(siteFilter) {
 
     process.stdout.write(`[run] ${site.name} … `);
     try {
-      const { hero, promo, tiles, screenshotPath } = await withTimeout(
+      const { hero, promo, tiles, divisions, screenshotPath } = await withTimeout(
         countSamsungBanners(site),
         `${site.name} banner scrape`
       );
@@ -135,6 +135,28 @@ async function runOnce(siteFilter) {
         ...tiles.matches.map((m) => ({ ...m, section: 'tile' })),
       ];
 
+      // Competition analysis: per-section brand breakdowns, division-level
+      // head-to-heads, and catalog/search brand shares in one object.
+      const competition = {
+        hero: hero.brands,
+        promo: promo.brands,
+        tiles: tiles.brands,
+        divisions,
+        devices: deviceShare ? deviceShare.brands || null : null,
+        search: searchShare ? searchShare.brands || null : null,
+      };
+      const topRivals = {};
+      for (const m of [hero.brands, promo.brands, tiles.brands, competition.devices, competition.search]) {
+        if (!m) continue;
+        for (const [b, n] of Object.entries(m)) if (b !== 'samsung' && b !== 'other') topRivals[b] = (topRivals[b] || 0) + n;
+      }
+      const rivalLine = Object.entries(topRivals)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([b, n]) => `${b} ${n}`)
+        .join(', ');
+      if (rivalLine) console.log(`        competitors seen: ${rivalLine}`);
+
       // In cloud mode (Supabase) push the screenshot to storage and record its
       // public URL; locally this returns null and the disk path is kept.
       const screenshotUrl = await store.uploadScreenshot(screenshotPath);
@@ -152,6 +174,7 @@ async function runOnce(siteFilter) {
         promo_total: promo.total,
         tile_count: tiles.count,
         tile_total: tiles.total,
+        competition,
       });
 
       items.push({

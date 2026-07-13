@@ -74,6 +74,8 @@ function createSqliteStore() {
   // `count`/`banner_total` hold HERO banners from 2026-07-08 onward.
   if (!cols.includes('promo_count')) db.exec('ALTER TABLE banner_runs ADD COLUMN promo_count INTEGER');
   if (!cols.includes('promo_total')) db.exec('ALTER TABLE banner_runs ADD COLUMN promo_total INTEGER');
+  // Competition analysis: per-brand breakdowns (sections, divisions, catalog, search).
+  if (!cols.includes('competition')) db.exec('ALTER TABLE banner_runs ADD COLUMN competition TEXT');
 
   const parse = (r) =>
     r && {
@@ -82,6 +84,7 @@ function createSqliteStore() {
       device_share: safeJson(r.device_share, null),
       search_share: safeJson(r.search_share, null),
       vision_check: safeJson(r.vision_check, null),
+      competition: safeJson(r.competition, null),
     };
 
   return {
@@ -90,8 +93,8 @@ function createSqliteStore() {
       const run_at = row.run_at || new Date().toISOString();
       const info = db
         .prepare(
-          `INSERT INTO banner_runs (site_id, run_at, count, matches, screenshot_path, device_share, search_share, banner_total, vision_check, tile_count, tile_total, promo_count, promo_total)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO banner_runs (site_id, run_at, count, matches, screenshot_path, device_share, search_share, banner_total, vision_check, tile_count, tile_total, promo_count, promo_total, competition)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           row.site_id,
@@ -106,7 +109,8 @@ function createSqliteStore() {
           row.tile_count == null ? null : row.tile_count | 0,
           row.tile_total == null ? null : row.tile_total | 0,
           row.promo_count == null ? null : row.promo_count | 0,
-          row.promo_total == null ? null : row.promo_total | 0
+          row.promo_total == null ? null : row.promo_total | 0,
+          row.competition ? JSON.stringify(row.competition) : null
         );
       return parse(db.prepare('SELECT * FROM banner_runs WHERE id = ?').get(Number(info.lastInsertRowid)));
     },
@@ -176,9 +180,17 @@ function createSupabaseStore() {
         tile_total: row.tile_total == null ? null : row.tile_total | 0,
         promo_count: row.promo_count == null ? null : row.promo_count | 0,
         promo_total: row.promo_total == null ? null : row.promo_total | 0,
+        competition: row.competition || null,
       };
       if (row.run_at) payload.run_at = row.run_at;
-      const { data, error } = await supabase.from('banner_runs').insert(payload).select().single();
+      let { data, error } = await supabase.from('banner_runs').insert(payload).select().single();
+      // Deployed DBs that predate the competition column must not lose the
+      // whole run — retry without it and warn.
+      if (error && /competition/i.test(error.message || '')) {
+        console.warn('[store] competition column missing in Supabase — run schema.sql ALTER; saving without it.');
+        delete payload.competition;
+        ({ data, error } = await supabase.from('banner_runs').insert(payload).select().single());
+      }
       if (error) throw error;
       return data;
     },

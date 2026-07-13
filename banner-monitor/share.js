@@ -31,7 +31,7 @@ const {
   dismissConsent,
   detectBlock,
 } = require('./scraper');
-const { BROWSER } = require('./config');
+const { BROWSER, brandOf } = require('./config');
 
 const SAMSUNG_PATTERNS = [/samsung/i, /\bgalaxy\b/i, /-SAM-/];
 
@@ -181,13 +181,26 @@ async function openGrid(page, site, url, cfg) {
 function tallyCards(cards, maxPositions) {
   const window = maxPositions ? cards.slice(0, maxPositions) : cards;
   const positions = [];
+  const brands = {}; // competition analysis: every card classified to a brand
   window.forEach((c, i) => {
     const hit = c.brand
       ? c.brand.toLowerCase().includes('samsung') // site declares brand: trust it
       : isSamsungText(c.title, c.href);
     if (hit) positions.push(i + 1);
+    const b = hit ? 'samsung' : brandOf(`${c.brand || ''} ${c.title || ''} ${c.href || ''}`);
+    brands[b] = (brands[b] || 0) + 1;
   });
-  return { total: window.length, samsung: positions.length, positions };
+  return { total: window.length, samsung: positions.length, positions, brands };
+}
+
+// Merge per-term/per-page brand maps into one.
+function mergeBrands(...maps) {
+  const out = {};
+  for (const m of maps) {
+    if (!m) continue;
+    for (const [k, v] of Object.entries(m)) out[k] = (out[k] || 0) + v;
+  }
+  return out;
 }
 
 async function measureDeviceShare(site) {
@@ -225,7 +238,7 @@ async function measureDeviceShare(site) {
       cards = await collect();
     }
 
-    const { total, samsung, positions } = tallyCards(cards, cfg.maxCards);
+    const { total, samsung, positions, brands } = tallyCards(cards, cfg.maxCards);
     const grandTotal = await readGrandTotal(page, cfg);
 
     return {
@@ -235,6 +248,7 @@ async function measureDeviceShare(site) {
       total,
       samsung,
       positions,
+      brands,
       sharePct: sharePct(samsung, total),
       grandTotal,
     };
@@ -264,9 +278,9 @@ async function measureOneTerm(context, site, cfg, term) {
       brand: cfg.brand || null,
       title: cfg.title || null,
     });
-    const { total, samsung, positions } = tallyCards(cards, want);
+    const { total, samsung, positions, brands } = tallyCards(cards, want);
     const grandTotal = await readGrandTotal(page, cfg);
-    return { term, url, total, samsung, positions, sharePct: sharePct(samsung, total), grandTotal };
+    return { term, url, total, samsung, positions, brands, sharePct: sharePct(samsung, total), grandTotal };
   } finally {
     await page.close().catch(() => {});
   }
@@ -285,6 +299,7 @@ function aggregateTerms(kind, results, note) {
     results,
     total,
     samsung,
+    brands: mergeBrands(...ok.map((r) => r.brands)),
     sharePct: sharePct(samsung, total),
     note,
   };
