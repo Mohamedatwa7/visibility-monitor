@@ -76,9 +76,78 @@ const SITES = [
     // Verified live 2026-07-03. If du ever ships search, model it on the
     // sharafdg block below (multi-term, {q} URL template).
   },
-  // stc and Ooredoo removed from the active roster 2026-07-06 (user request:
-  // "remove for now"). Their tuning notes are preserved in DISABLED_SITES
-  // below — move an entry back into SITES to re-enable it.
+  {
+    id: 'ooredoo',
+    name: 'Ooredoo',
+    // Re-enabled 2026-07-13 (user request). Root redirects to /web/en/;
+    // sits behind an F5 BIG-IP WAF — needs the stealth context.
+    url: 'https://www.ooredoo.qa/web/en/',
+    region: 'Qatar',
+    timezoneId: 'Asia/Qatar',
+    locale: 'en-QA',
+    // Homepage links straight to purchasable eshop products.
+    tileRegex: /\/products\//i,
+    // eshop.ooredoo.qa collections grid (Quasar SPA): 20 cards/page; ?page=N
+    // is ignored and no numbered pager is exposed — advance via the Next
+    // arrow (page-replacing). Product slugs carry the brand, so no title
+    // selector is needed. No text search endpoint (telecom, like du/e&).
+    devices: {
+      url: 'https://eshop.ooredoo.qa/en/collections/mobile-phones',
+      card: '.desktop-product-card-width',
+      nextButton: true,
+      pages: 5,
+    },
+  },
+  {
+    id: 'vodafone',
+    name: 'Vodafone Qatar',
+    url: 'https://www.vodafone.qa/en/home',
+    region: 'Qatar',
+    timezoneId: 'Asia/Qatar',
+    locale: 'en-QA',
+    // shop.vodafone.qa is a React storefront: cards are <article>s with
+    // hashed class names and NO anchors (JS navigation) — match on the
+    // class-name prefix and read the card's own text ('@self'). The only
+    // stable browse surface is the Deals & Promos shelf ("Showing 12 of 41
+    // products", Load-next button); smartphones/mobile category URLs and
+    // catalogsearch all render empty. No search share.
+    devices: {
+      url: 'https://shop.vodafone.qa/en/shop/digital-exclusive.html?page=1',
+      card: 'article[class*="productHoverCardItem-cardRoot"]',
+      title: '@self',
+      totalSelector: '[class*="productCount"]',
+      totalPattern: /of\s*(\d+)\s*products/i,
+      loadMoreSelector: '[class*="loadButton"]',
+      pages: 4,
+    },
+  },
+  {
+    id: 'emax',
+    name: 'Emax',
+    url: 'https://www.emaxme.com/', // redirects to uae.emaxme.com
+    region: 'UAE',
+    // Purchasable product URLs: /buy-<product>-p-<id>
+    tileRegex: /\/buy-.+-p-/i,
+    // SAP-Hybris-style storefront; 48 cards render on the mobiles category.
+    devices: {
+      url: 'https://uae.emaxme.com/shop-mobile',
+      card: '.product_wrapper',
+      title: '.product-desc',
+      pages: 3,
+    },
+    // Real text search at /search?text= — same multi-phrase method as Sharaf DG.
+    search: {
+      kind: 'grid',
+      url: 'https://uae.emaxme.com/search?text={q}',
+      terms: ['phones', 'smartphone', 'mobile phone', '5g phone'],
+      card: '.product_wrapper',
+      title: '.product-desc',
+      maxPositions: 24,
+    },
+  },
+  // stc removed from the active roster 2026-07-06 (user request:
+  // "remove for now"). Its tuning notes are preserved in DISABLED_SITES
+  // below — move the entry back into SITES to re-enable it.
   {
     id: 'sharafdg',
     name: 'Sharaf DG',
@@ -134,16 +203,6 @@ const DISABLED_SITES = [
     region: 'KSA',
     timezoneId: 'Asia/Riyadh',
     locale: 'en-SA',
-  },
-  {
-    id: 'ooredoo',
-    name: 'Ooredoo',
-    // /portal/en/home 404s; the root redirects to /web/en/.
-    // Ooredoo sits behind an F5 BIG-IP WAF — needs the stealth context.
-    url: 'https://www.ooredoo.qa/web/en/',
-    region: 'Qatar',
-    timezoneId: 'Asia/Qatar',
-    locale: 'en-QA',
   },
 ];
 

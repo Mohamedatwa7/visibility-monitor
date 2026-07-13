@@ -360,6 +360,120 @@ function DivisionLine({ label, brands }) {
   );
 }
 
+// Multi-brand share trend: one line per top brand, hover/drag to inspect —
+// this is where week-over-week competitive movement shows up.
+function CompetitionTrend({ site }) {
+  const S = styles;
+  const [hover, setHover] = useState(null);
+  const pts = (site.history || []).filter((h) => h.competitionBrands);
+  if (pts.length < 2) return <div style={S.noTrend}>Competition trend appears after a few daily checks.</div>;
+
+  // Top 5 brands by latest share, Samsung always included.
+  const latest = pts[pts.length - 1].competitionBrands;
+  const brands = Object.entries(latest)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([b]) => b);
+  if (!brands.includes('samsung') && latest.samsung != null) brands.splice(4, 1, 'samsung');
+
+  const w = 280;
+  const h = 104;
+  const padL = 26;
+  const padR = 8;
+  const padT = 8;
+  const padB = 8;
+  const maxPct = Math.max(10, ...pts.flatMap((p) => brands.map((b) => p.competitionBrands[b] || 0))) * 1.15;
+  const x = (i) => padL + (i * (w - padL - padR)) / (pts.length - 1);
+  const y = (v) => h - padB - ((v || 0) / maxPct) * (h - padT - padB);
+  const line = (b) =>
+    pts
+      .map((p, i) => {
+        const v = p.competitionBrands[b];
+        return v == null ? null : `${i === 0 || pts[i - 1].competitionBrands[b] == null ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(v).toFixed(1)}`;
+      })
+      .filter(Boolean)
+      .join(' ');
+
+  const scrub = (clientX, target) => {
+    const rect = target.getBoundingClientRect();
+    const px = ((clientX - rect.left) / rect.width) * w;
+    const i = Math.round(((px - padL) / (w - padL - padR)) * (pts.length - 1));
+    setHover(Math.max(0, Math.min(pts.length - 1, i)));
+  };
+  const hp = hover == null ? null : pts[hover];
+  const gridVals = [0, Math.round(maxPct / 2), Math.round(maxPct)];
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={S.chartTitleRow}>
+        <span style={S.chartTitle}>Catalog share trend — top brands (%)</span>
+        <span style={S.chartHint}>hover / drag</span>
+      </div>
+      <div style={{ position: 'relative' }}>
+        <svg
+          width="100%"
+          viewBox={`0 0 ${w} ${h}`}
+          style={{ display: 'block', cursor: 'crosshair', touchAction: 'none' }}
+          onMouseMove={(e) => scrub(e.clientX, e.currentTarget)}
+          onMouseLeave={() => setHover(null)}
+          onTouchMove={(e) => e.touches[0] && scrub(e.touches[0].clientX, e.currentTarget)}
+          onTouchEnd={() => setHover(null)}
+        >
+          {gridVals.map((v) => (
+            <g key={v}>
+              <line x1={padL} x2={w - padR} y1={y(v)} y2={y(v)} stroke="#f1f5f9" strokeWidth="1" />
+              <text x={padL - 4} y={y(v) + 2.5} textAnchor="end" fontSize="7" fill="#94a3b8">
+                {v}%
+              </text>
+            </g>
+          ))}
+          {brands.map((b) => (
+            <path
+              key={b}
+              d={line(b)}
+              fill="none"
+              stroke={brandMeta(b).color}
+              strokeWidth={b === 'samsung' ? 2.4 : 1.6}
+              strokeLinecap="round"
+              opacity={b === 'samsung' ? 1 : 0.85}
+            />
+          ))}
+          {hp && (
+            <line x1={x(hover)} x2={x(hover)} y1={padT} y2={h - padB} stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
+          )}
+        </svg>
+        {hp && (
+          <div
+            style={{
+              ...S.tooltip,
+              left: `${(x(hover) / w) * 100}%`,
+              transform: x(hover) > w * 0.55 ? 'translateX(calc(-100% - 10px))' : 'translateX(10px)',
+            }}
+          >
+            <div style={S.tooltipDate}>{fmtTime(hp.run_at)}</div>
+            {brands
+              .filter((b) => hp.competitionBrands[b] != null)
+              .sort((a, b) => hp.competitionBrands[b] - hp.competitionBrands[a])
+              .map((b) => (
+                <div key={b} style={S.tooltipRow}>
+                  <i style={{ ...S.legendDot, background: brandMeta(b).color }} /> {brandMeta(b).label}:{' '}
+                  <strong>{hp.competitionBrands[b]}%</strong>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+      <div style={{ ...S.legendRow, flexWrap: 'wrap' }}>
+        {brands.map((b) => (
+          <span key={b} style={S.legendItem}>
+            <i style={{ ...S.legendDot, background: brandMeta(b).color }} /> {brandMeta(b).label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Per-site competition panel: brand leaderboards per metric + division lines.
 function CompetitionCard({ site }) {
   const S = styles;
@@ -389,6 +503,9 @@ function CompetitionCard({ site }) {
           ))}
         </div>
       )}
+      <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 8 }}>
+        <CompetitionTrend site={site} />
+      </div>
     </div>
   );
 }
@@ -441,6 +558,50 @@ function AssetsModal({ site, onClose }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Where Samsung's devices actually SIT on the catalog: a tick-strip of the
+// whole shelf (one slot per device, Samsung slots in blue) plus the numbers a
+// merchandiser asks first — first position, median, and presence in the
+// prime first-24 window.
+function ShelfPositions({ deviceShare }) {
+  const S = styles;
+  const pos = (deviceShare && deviceShare.positions) || [];
+  const total = (deviceShare && deviceShare.total) || 0;
+  if (!pos.length || !total) return null;
+  const sorted = pos.slice().sort((a, b) => a - b);
+  const first = sorted[0];
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const top24 = sorted.filter((p) => p <= 24).length;
+  const set = new Set(sorted);
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={S.shelfHead}>
+        <span style={S.shelfTitle}>Position on page</span>
+        <span style={S.shelfStats}>
+          first <strong>#{first}</strong> · median <strong>#{median}</strong> · in top 24:{' '}
+          <strong>{top24}</strong>
+        </span>
+      </div>
+      <svg
+        width="100%"
+        height="14"
+        viewBox={`0 0 ${total} 14`}
+        preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 4, background: '#f1f5f9' }}
+      >
+        {/* prime window shading (first 24 slots) */}
+        <rect x="0" y="0" width={Math.min(24, total)} height="14" fill="#e2e8f0" />
+        {Array.from(set).map((p) => (
+          <rect key={p} x={p - 1} y="1.5" width="1" height="11" fill="#1428a0" />
+        ))}
+      </svg>
+      <div style={S.shelfCaption}>
+        ← page top{'  '}(shaded = first 24 slots){'  '}·{'  '}each blue tick = one Samsung device of {total}
       </div>
     </div>
   );
@@ -754,6 +915,7 @@ export default function BannerMonitorDashboard() {
                     <Delta label="MoM" now={s.deviceShare.sharePct} then={devMoM} unit=" pt" />
                     {s.deviceShare.pages > 1 && <span style={S.chipInfo}>first {s.deviceShare.pages} pages</span>}
                   </div>
+                  <ShelfPositions deviceShare={s.deviceShare} />
                 </div>
               )}
 
@@ -1036,6 +1198,10 @@ const styles = {
   lbNum: { width: 74, textAlign: 'right', fontSize: 12, color: '#0f172a', flexShrink: 0 },
   lbPct: { color: '#94a3b8', fontSize: 11, fontWeight: 500 },
   divLine: { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid #f8fafc' },
+  shelfHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 },
+  shelfTitle: { fontSize: 12, fontWeight: 700, color: '#334155' },
+  shelfStats: { fontSize: 11, color: '#64748b' },
+  shelfCaption: { fontSize: 10, color: '#94a3b8', marginTop: 3 },
   divName: { width: 118, fontSize: 12, fontWeight: 700, color: '#334155', flexShrink: 0 },
   divRankChip: { flexShrink: 0 },
   divDetail: { fontSize: 11.5, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },

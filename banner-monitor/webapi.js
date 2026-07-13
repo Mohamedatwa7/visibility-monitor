@@ -78,6 +78,29 @@ router.get('/api/sites', async (_req, res) => {
           .map((r) => ({
             run_at: r.run_at,
             count: r.count,
+            // Per-run brand share map (%) for the competition trend graph.
+            // Prefer the device catalog (cleanest shelf metric); fall back to
+            // homepage placements for sites without a catalog config.
+            competitionBrands: (() => {
+              const comp = r.competition;
+              if (!comp) return null;
+              let src = comp.devices;
+              if (!src || !Object.keys(src).length) {
+                src = {};
+                for (const m of [comp.hero, comp.promo, comp.tiles]) {
+                  if (!m) continue;
+                  for (const [b, n] of Object.entries(m)) src[b] = (src[b] || 0) + n;
+                }
+              }
+              const total = Object.values(src).reduce((a, b) => a + b, 0);
+              if (!total) return null;
+              const out = {};
+              for (const [b, n] of Object.entries(src)) {
+                if (b === 'other') continue;
+                out[b] = Math.round((n / total) * 1000) / 10;
+              }
+              return out;
+            })(),
             bannerSharePct: r.banner_total ? Math.round((r.count / r.banner_total) * 1000) / 10 : null,
             promoCount: r.promo_count == null ? null : r.promo_count,
             promoSharePct: r.promo_total ? Math.round(((r.promo_count || 0) / r.promo_total) * 1000) / 10 : null,

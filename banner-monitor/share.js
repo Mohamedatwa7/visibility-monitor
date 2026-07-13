@@ -48,6 +48,9 @@ function sharePct(samsung, total) {
 function collectCardsInPage({ card, brand, title }) {
   const pick = (el, sel) => {
     if (!sel) return '';
+    // '@self': the card's own text — for sites whose cards carry no anchors
+    // or dedicated title element (Vodafone's JS-navigation cards).
+    if (sel === '@self') return (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200);
     const n = el.querySelector(sel);
     return n ? (n.textContent || '').replace(/\s+/g, ' ').trim() : '';
   };
@@ -168,6 +171,33 @@ async function clickPagerPage(page, cfg, n) {
   return false;
 }
 
+// Next-button pagination (Ooredoo's eshop: numbered pages aren't exposed and
+// ?page= is ignored — only the Next arrow advances the grid, replacing it).
+async function clickNextButton(page, cfg) {
+  const before = await firstCardId(page, cfg.card);
+  const clicked = await page
+    .evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll("button, a, [role='button']"));
+      for (const n of nodes) {
+        const txt = (n.innerText || n.getAttribute('aria-label') || '').trim();
+        if (/^next\b/i.test(txt) && n.offsetParent !== null && !n.disabled) {
+          n.scrollIntoView({ block: 'center' });
+          n.click();
+          return true;
+        }
+      }
+      return false;
+    })
+    .catch(() => false);
+  if (!clicked) return false;
+  for (let i = 0; i < 16; i++) {
+    await page.waitForTimeout(500);
+    const now = await firstCardId(page, cfg.card);
+    if (now && now !== before) return true;
+  }
+  return false;
+}
+
 // Load a grid URL and wait until product cards are actually rendered (both
 // du and e& grids are JS-rendered SPAs; DOM-ready is not enough).
 async function openGrid(page, site, url, cfg) {
@@ -221,11 +251,14 @@ async function measureDeviceShare(site) {
     let pages = 1;
     let cards;
     const wantPages = cfg.pages || 5;
-    if (cfg.pagerSelector) {
+    if (cfg.pagerSelector || cfg.nextButton) {
       // Page-replacing pager: accumulate each page's cards as we click through.
       cards = await collect();
       while (pages < wantPages) {
-        if (!(await clickPagerPage(page, cfg, pages + 1))) break;
+        const advanced = cfg.nextButton
+          ? await clickNextButton(page, cfg)
+          : await clickPagerPage(page, cfg, pages + 1);
+        if (!advanced) break;
         pages++;
         cards = cards.concat(await collect());
       }
