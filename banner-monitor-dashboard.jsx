@@ -290,7 +290,17 @@ function Leaderboard({ title, data, subtitle }) {
   const entries = Object.entries(data || {}).filter(([b]) => b !== 'other');
   const otherN = (data && data.other) || 0;
   const total = entries.reduce((n, [, v]) => n + v, 0) + otherN;
-  if (!total || !entries.length) return null;
+  if (!total) return null;
+  if (!entries.length) {
+    return (
+      <div style={{ marginBottom: 14 }}>
+        <div style={S.lbHead}>
+          <span style={S.lbTitle}>{title}</span>
+          <span style={S.lbSub}>no branded placements among {total} on the page</span>
+        </div>
+      </div>
+    );
+  }
   entries.sort((a, b) => b[1] - a[1]);
   const top = entries.slice(0, 5);
   const restN = entries.slice(5).reduce((n, [, v]) => n + v, 0) + otherN;
@@ -361,12 +371,15 @@ function DivisionLine({ label, brands }) {
 }
 
 // Multi-brand share trend: one line per top brand, hover/drag to inspect —
-// this is where week-over-week competitive movement shows up.
-function CompetitionTrend({ site }) {
+// this is where week-over-week competitive movement shows up. `field` picks
+// the metric: 'placementBrands' (homepage) or 'catalogBrands' (device catalog).
+function CompetitionTrend({ site, field, title }) {
   const S = styles;
   const [hover, setHover] = useState(null);
-  const pts = (site.history || []).filter((h) => h.competitionBrands);
-  if (pts.length < 2) return <div style={S.noTrend}>Competition trend appears after a few daily checks.</div>;
+  const pts = (site.history || [])
+    .filter((h) => h[field])
+    .map((h) => ({ run_at: h.run_at, competitionBrands: h[field] }));
+  if (pts.length < 2) return <div style={S.noTrend}>{title} trend appears after a few daily checks.</div>;
 
   // Top 5 brands by latest share, Samsung always included.
   const latest = pts[pts.length - 1].competitionBrands;
@@ -406,7 +419,7 @@ function CompetitionTrend({ site }) {
   return (
     <div style={{ marginTop: 4 }}>
       <div style={S.chartTitleRow}>
-        <span style={S.chartTitle}>Catalog share trend — top brands (%)</span>
+        <span style={S.chartTitle}>{title} — top brands (%)</span>
         <span style={S.chartHint}>hover / drag</span>
       </div>
       <div style={{ position: 'relative' }}>
@@ -490,11 +503,32 @@ function CompetitionCard({ site }) {
   return (
     <div style={S.card}>
       <div style={S.siteName}>{site.name}</div>
+
+      {/* Homepage placements, broken down by placement type */}
       <div style={{ marginTop: 12 }}>
-        <Leaderboard title="Homepage placements" data={placements} />
-        {c.devices && <Leaderboard title="Device catalog" subtitle="first 5 pages" data={c.devices} />}
-        {c.search && <Leaderboard title="Search results" subtitle="common phone searches" data={c.search} />}
+        <div style={S.divisionHead}>Homepage placements</div>
+        <Leaderboard title="Hero banners" data={c.hero} />
+        <Leaderboard title="Promo cards" data={c.promo} />
+        <Leaderboard title="Product tiles" data={c.tiles} />
+        <CompetitionTrend site={site} field="placementBrands" title="Homepage placements" />
       </div>
+
+      {/* Device catalog */}
+      {c.devices && (
+        <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 10 }}>
+          <div style={S.divisionHead}>Device catalog</div>
+          <Leaderboard title="Share of catalog" subtitle="first 5 pages" data={c.devices} />
+          <CompetitionTrend site={site} field="catalogBrands" title="Device catalog" />
+        </div>
+      )}
+
+      {/* Search */}
+      {c.search && (
+        <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 10 }}>
+          <Leaderboard title="Search results" subtitle="common phone searches" data={c.search} />
+        </div>
+      )}
+
       {divisions.length > 0 && (
         <div style={{ marginTop: 4 }}>
           <div style={S.divisionHead}>Samsung's position by division</div>
@@ -503,9 +537,6 @@ function CompetitionCard({ site }) {
           ))}
         </div>
       )}
-      <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 8 }}>
-        <CompetitionTrend site={site} />
-      </div>
     </div>
   );
 }
@@ -563,10 +594,10 @@ function AssetsModal({ site, onClose }) {
   );
 }
 
-// Where Samsung's devices actually SIT on the catalog: a tick-strip of the
-// whole shelf (one slot per device, Samsung slots in blue) plus the numbers a
-// merchandiser asks first — first position, median, and presence in the
-// prime first-24 window.
+// Where Samsung's devices actually SIT on the catalog. Every Samsung device
+// is a numbered chip (#5, #12, …) colored by shelf zone so each position is
+// individually readable: green = top 10 (prime), blue = 11–24 (first page
+// view), gray = deeper.
 function ShelfPositions({ deviceShare }) {
   const S = styles;
   const pos = (deviceShare && deviceShare.positions) || [];
@@ -575,33 +606,36 @@ function ShelfPositions({ deviceShare }) {
   const sorted = pos.slice().sort((a, b) => a - b);
   const first = sorted[0];
   const median = sorted[Math.floor(sorted.length / 2)];
-  const top24 = sorted.filter((p) => p <= 24).length;
-  const set = new Set(sorted);
+  const zones = [
+    { label: 'Top 10 (prime)', style: S.posChipPrime, n: sorted.filter((p) => p <= 10).length },
+    { label: '11–24', style: S.posChipGood, n: sorted.filter((p) => p > 10 && p <= 24).length },
+    { label: 'deeper', style: S.posChipDeep, n: sorted.filter((p) => p > 24).length },
+  ];
+  const chipStyle = (p) => (p <= 10 ? S.posChipPrime : p <= 24 ? S.posChipGood : S.posChipDeep);
 
   return (
     <div style={{ marginTop: 6 }}>
       <div style={S.shelfHead}>
-        <span style={S.shelfTitle}>Position on page</span>
+        <span style={S.shelfTitle}>Where Samsung devices appear ({sorted.length} of {total} slots)</span>
         <span style={S.shelfStats}>
-          first <strong>#{first}</strong> · median <strong>#{median}</strong> · in top 24:{' '}
-          <strong>{top24}</strong>
+          first at <strong>#{first}</strong> · half beyond <strong>#{median}</strong>
         </span>
       </div>
-      <svg
-        width="100%"
-        height="14"
-        viewBox={`0 0 ${total} 14`}
-        preserveAspectRatio="none"
-        style={{ display: 'block', borderRadius: 4, background: '#f1f5f9' }}
-      >
-        {/* prime window shading (first 24 slots) */}
-        <rect x="0" y="0" width={Math.min(24, total)} height="14" fill="#e2e8f0" />
-        {Array.from(set).map((p) => (
-          <rect key={p} x={p - 1} y="1.5" width="1" height="11" fill="#1428a0" />
+      <div style={S.posChipWrap}>
+        {sorted.map((p) => (
+          <span key={p} style={{ ...S.posChip, ...chipStyle(p) }}>
+            #{p}
+          </span>
         ))}
-      </svg>
+      </div>
       <div style={S.shelfCaption}>
-        ← page top{'  '}(shaded = first 24 slots){'  '}·{'  '}each blue tick = one Samsung device of {total}
+        {zones
+          .filter((z) => z.n > 0)
+          .map((z, i) => (
+            <span key={z.label} style={{ marginRight: 10 }}>
+              <span style={{ ...S.posLegendDot, ...z.style }} /> {z.label}: <strong>{z.n}</strong>
+            </span>
+          ))}
       </div>
     </div>
   );
@@ -1198,10 +1232,16 @@ const styles = {
   lbNum: { width: 74, textAlign: 'right', fontSize: 12, color: '#0f172a', flexShrink: 0 },
   lbPct: { color: '#94a3b8', fontSize: 11, fontWeight: 500 },
   divLine: { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid #f8fafc' },
-  shelfHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 },
+  shelfHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4, gap: 8, flexWrap: 'wrap' },
   shelfTitle: { fontSize: 12, fontWeight: 700, color: '#334155' },
   shelfStats: { fontSize: 11, color: '#64748b' },
-  shelfCaption: { fontSize: 10, color: '#94a3b8', marginTop: 3 },
+  shelfCaption: { fontSize: 10.5, color: '#64748b', marginTop: 5 },
+  posChipWrap: { display: 'flex', flexWrap: 'wrap', gap: 3, maxHeight: 92, overflowY: 'auto', padding: '2px 0' },
+  posChip: { fontSize: 10, fontWeight: 700, borderRadius: 5, padding: '1.5px 5px', border: '1px solid transparent' },
+  posChipPrime: { background: '#ecfdf5', color: '#047857', borderColor: '#a7f3d0' },
+  posChipGood: { background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' },
+  posChipDeep: { background: '#f1f5f9', color: '#64748b', borderColor: '#e2e8f0' },
+  posLegendDot: { display: 'inline-block', width: 9, height: 9, borderRadius: 3, verticalAlign: 'middle', border: '1px solid transparent' },
   divName: { width: 118, fontSize: 12, fontWeight: 700, color: '#334155', flexShrink: 0 },
   divRankChip: { flexShrink: 0 },
   divDetail: { fontSize: 11.5, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },

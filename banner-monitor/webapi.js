@@ -78,28 +78,28 @@ router.get('/api/sites', async (_req, res) => {
           .map((r) => ({
             run_at: r.run_at,
             count: r.count,
-            // Per-run brand share map (%) for the competition trend graph.
-            // Prefer the device catalog (cleanest shelf metric); fall back to
-            // homepage placements for sites without a catalog config.
-            competitionBrands: (() => {
+            // Per-run brand share maps (%) for the two competition trend
+            // graphs: homepage placements (hero+promo+tiles) and device catalog.
+            ...(() => {
               const comp = r.competition;
-              if (!comp) return null;
-              let src = comp.devices;
-              if (!src || !Object.keys(src).length) {
-                src = {};
-                for (const m of [comp.hero, comp.promo, comp.tiles]) {
-                  if (!m) continue;
-                  for (const [b, n] of Object.entries(m)) src[b] = (src[b] || 0) + n;
+              if (!comp) return { placementBrands: null, catalogBrands: null };
+              const pctMap = (src) => {
+                if (!src) return null;
+                const total = Object.values(src).reduce((a, b) => a + b, 0);
+                if (!total) return null;
+                const out = {};
+                for (const [b, n] of Object.entries(src)) {
+                  if (b === 'other') continue;
+                  out[b] = Math.round((n / total) * 1000) / 10;
                 }
+                return Object.keys(out).length ? out : null;
+              };
+              const merged = {};
+              for (const m of [comp.hero, comp.promo, comp.tiles]) {
+                if (!m) continue;
+                for (const [b, n] of Object.entries(m)) merged[b] = (merged[b] || 0) + n;
               }
-              const total = Object.values(src).reduce((a, b) => a + b, 0);
-              if (!total) return null;
-              const out = {};
-              for (const [b, n] of Object.entries(src)) {
-                if (b === 'other') continue;
-                out[b] = Math.round((n / total) * 1000) / 10;
-              }
-              return out;
+              return { placementBrands: pctMap(merged), catalogBrands: pctMap(comp.devices) };
             })(),
             bannerSharePct: r.banner_total ? Math.round((r.count / r.banner_total) * 1000) / 10 : null,
             promoCount: r.promo_count == null ? null : r.promo_count,
