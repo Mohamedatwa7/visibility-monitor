@@ -483,6 +483,14 @@ async function countSamsungBanners(site) {
 
     const section = (cls) => {
       const all = recs.filter((r) => classOf(r) === cls);
+      if (process.env.DEBUG_SECTIONS) {
+        console.log(`\n[debug] ${cls} placements (${all.length}):`);
+        all.forEach((r, i) =>
+          console.log(
+            `  ${i + 1}. samsung=${r.samsung} w=${r.w} ownW=${r.ownW} ${(r.src || r.href || '(none)').slice(0, 110)}`
+          )
+        );
+      }
       const matches = all.filter((r) => r.samsung).map(({ key, src, alt, href }) => ({ key, src, alt, href }));
       return { count: matches.length, total: all.length, matches, brands: brandTally(all) };
     };

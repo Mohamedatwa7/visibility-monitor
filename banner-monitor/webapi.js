@@ -30,8 +30,12 @@ router.get('/api/sites', async (_req, res) => {
     // sees Samsung placements there, the DOM selectors are blind to that
     // section (e.g. e&'s CSS-background hero) — display the AI's count as the
     // higher-confidence number.
-    const reconcile = (domCount, aiCount) =>
-      domCount === 0 && aiCount != null && aiCount >= 1 ? aiCount : domCount;
+    // Only when the DOM sees NOTHING in a section AND the AI's count doesn't
+    // contradict the DOM's denominator (an AI count above the section total
+    // means the AI counted items the DOM classified elsewhere — showing
+    // "2/1" would be nonsense).
+    const reconcile = (domCount, aiCount, total) =>
+      domCount === 0 && aiCount != null && aiCount >= 1 && (!total || aiCount <= total) ? aiCount : domCount;
 
     const out = [];
     for (const site of SITES) {
@@ -45,17 +49,17 @@ router.get('/api/sites', async (_req, res) => {
         url: site.url,
         region: site.region,
         type: site.type || 'operator',
-        count: latest ? (vc ? reconcile(latest.count, vc.hero) : latest.count) : null,
+        count: latest ? (vc ? reconcile(latest.count, vc.hero, latest.banner_total) : latest.count) : null,
         bannerTotal: latest ? (latest.banner_total == null ? null : latest.banner_total) : null,
         promoCount: latest
           ? vc
-            ? reconcile(latest.promo_count == null ? 0 : latest.promo_count, vc.promo)
+            ? reconcile(latest.promo_count == null ? 0 : latest.promo_count, vc.promo, latest.promo_total)
             : latest.promo_count
           : null,
         promoTotal: latest ? (latest.promo_total == null ? null : latest.promo_total) : null,
         tileCount: latest
           ? vc
-            ? reconcile(latest.tile_count == null ? 0 : latest.tile_count, vc.tiles)
+            ? reconcile(latest.tile_count == null ? 0 : latest.tile_count, vc.tiles, latest.tile_total)
             : latest.tile_count
           : null,
         tileTotal: latest ? (latest.tile_total == null ? null : latest.tile_total) : null,

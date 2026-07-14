@@ -24,6 +24,9 @@ const SITES = [
     // The live consumer site is eand.ae.
     url: 'https://www.eand.ae/en/index.html',
     region: 'UAE',
+    // Real carousel creatives are 792px wide; a 448px "download our app"
+    // image inside a full-width strip was sneaking into the hero count.
+    heroMinOwnWidth: 600,
     // regex: /samsung|galaxy/i,        // override example
     // consentSelector: '#onetrust-accept-btn-handler',
     // e& device grid is AngularJS; renders 10 cards initially, total in
