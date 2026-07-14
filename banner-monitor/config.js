@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * Central configuration for the Samsung banner monitor.
@@ -38,7 +38,7 @@ const SITES = [
       pages: 5,
     },
     // NO search share for e&: the eshop exposes no text search endpoint
-    // (verified live 2026-07-03) — the device grid above is its only
+    // (verified live 2026-07-03) â€” the device grid above is its only
     // product-discovery surface, and that is already covered by `devices`.
   },
   {
@@ -47,7 +47,7 @@ const SITES = [
     type: 'operator',
     url: 'https://www.du.ae/personal',
     region: 'UAE',
-    // Placement classes: du has NO product tiles (user rule 2026-07-08) —
+    // Placement classes: du has NO product tiles (user rule 2026-07-08) â€”
     // nothing on its homepage is directly purchasable, so device cards like
     // "Galaxy S26 Ultra Starting at 185/mo" are PROMO CARDS. No tileRegex:
     // everything non-hero classifies as promo.
@@ -59,11 +59,11 @@ const SITES = [
     // block dedupe would collapse S26 + Fold7 + iPhone tiles into one entry.
     matchBlockText: true,
     // 'image-query': du serves every creative from the SAME path
-    // (.../Satellite?blobwhere=<id>) — the query string is the image identity,
+    // (.../Satellite?blobwhere=<id>) â€” the query string is the image identity,
     // so plain image dedupe would collapse all tiles into one entry.
     bannerDedupe: 'image-query',
     // Device-catalog share. shop.du.ae is an SAP Commerce SPA (flat HTTP only
-    // returns an app shell) — cards must be waited for. Paging shows "40 of 162".
+    // returns an app shell) â€” cards must be waited for. Paging shows "40 of 162".
     devices: {
       url: 'https://shop.du.ae/en/personal/c-mobile-phones#category=mobile-phones&brands=all',
       card: 'a.du-device-card',
@@ -74,7 +74,7 @@ const SITES = [
       pages: 5,
     },
     // NO search share for du: the site has no working text search
-    // (/search?q=… 302s to an error page), so there is nothing to measure.
+    // (/search?q=â€¦ 302s to an error page), so there is nothing to measure.
     // Verified live 2026-07-03. If du ever ships search, model it on the
     // sharafdg block below (multi-term, {q} URL template).
   },
@@ -83,7 +83,7 @@ const SITES = [
     name: 'Ooredoo',
     type: 'operator',
     // Re-enabled 2026-07-13 (user request). Root redirects to /web/en/;
-    // sits behind an F5 BIG-IP WAF — needs the stealth context.
+    // sits behind an F5 BIG-IP WAF â€” needs the stealth context.
     url: 'https://www.ooredoo.qa/web/en/',
     region: 'Qatar',
     timezoneId: 'Asia/Qatar',
@@ -91,7 +91,7 @@ const SITES = [
     // Homepage links straight to purchasable eshop products.
     tileRegex: /\/products\//i,
     // eshop.ooredoo.qa collections grid (Quasar SPA): 20 cards/page; ?page=N
-    // is ignored and no numbered pager is exposed — advance via the Next
+    // is ignored and no numbered pager is exposed â€” advance via the Next
     // arrow (page-replacing). Product slugs carry the brand, so no title
     // selector is needed. No text search endpoint (telecom, like du/e&).
     devices: {
@@ -111,7 +111,7 @@ const SITES = [
     timezoneId: 'Asia/Qatar',
     locale: 'en-QA',
     // shop.vodafone.qa is a React storefront: cards are <article>s with
-    // hashed class names and NO anchors (JS navigation) — match on the
+    // hashed class names and NO anchors (JS navigation) â€” match on the
     // class-name prefix and read the card's own text ('@self'). The only
     // stable browse surface is the Deals & Promos shelf ("Showing 12 of 41
     // products", Load-next button); smartphones/mobile category URLs and
@@ -123,7 +123,7 @@ const SITES = [
       totalSelector: '[class*="productCount"]',
       totalPattern: /of\s*(\d+)\s*products/i,
       loadMoreSelector: '[class*="loadButton"]',
-      pages: 4,
+      pages: 5,
     },
   },
   {
@@ -142,7 +142,7 @@ const SITES = [
       pages: 5,
     },
     reviews: { url: 'https://uae.emaxme.com/search?text=galaxy s26 ultra', findProduct: /s26[-\s]?ultra/i },
-    // Real text search at /search?text= — same multi-phrase method as Sharaf DG.
+    // Real text search at /search?text= â€” same multi-phrase method as Sharaf DG.
     search: {
       kind: 'grid',
       url: 'https://uae.emaxme.com/search?text={q}',
@@ -160,7 +160,7 @@ const SITES = [
     region: 'Oman',
     timezoneId: 'Asia/Muscat',
     locale: 'en-OM',
-    // NOTE: Omantel's cookie bar has "agree"-style LINKS to its terms pages —
+    // NOTE: Omantel's cookie bar has "agree"-style LINKS to its terms pages â€”
     // the global consent-dismisser skips navigating anchors because of this.
     // Devices are sold via the XHAWI marketplace partner (Shopify): the
     // Omantel Store collection. Brand comes from /products/ slugs; the grid
@@ -168,7 +168,7 @@ const SITES = [
     devices: {
       url: 'https://www.xhawi.com/collections/omantel-store-collection',
       card: '.loadmore-item',
-      pages: 3,
+      pages: 5,
     },
   },
   {
@@ -180,13 +180,13 @@ const SITES = [
     timezoneId: 'Asia/Bahrain',
     locale: 'en-BH',
     // OpenCart shop; 32 cards render with a load-more button. Product hrefs
-    // are opaque ids (product_id=7149) — brand lives in the card text.
+    // are opaque ids (product_id=7149) â€” brand lives in the card text.
     devices: {
       url: 'https://shop.stc.com.bh/index.php?route=product/category&path=102&allproducts=1',
       card: '.rvl-product-element',
       title: '@self',
       loadMoreSelector: '.rvl-load-more-btn',
-      pages: 4,
+      pages: 5,
     },
   },
   {
@@ -198,7 +198,7 @@ const SITES = [
     timezoneId: 'Asia/Kuwait',
     locale: 'en-KW',
     // Hero carousel renders the same creative in several blocks AND as
-    // separate image/CTA elements pointing at one product — dedupe by
+    // separate image/CTA elements pointing at one product â€” dedupe by
     // destination so one campaign counts once.
     bannerDedupe: 'href',
     // Liferay shop; /en/shop/devices renders 15 product cards (devices +
@@ -207,7 +207,7 @@ const SITES = [
       url: 'https://www.kw.zain.com/en/shop/devices',
       card: '.products-grid-item',
       title: '@self',
-      pages: 3,
+      pages: 5,
     },
   },
   {
@@ -218,7 +218,7 @@ const SITES = [
     region: 'Kuwait',
     timezoneId: 'Asia/Kuwait',
     locale: 'en-KW',
-    // Product pages end in /p — purchasable tiles.
+    // Product pages end in /p â€” purchasable tiles.
     tileRegex: /\/p(?:\?|\s|$)/i,
     devices: {
       url: 'https://www.xcite.com/mobile-phones/c',
@@ -246,16 +246,16 @@ const SITES = [
     region: 'UAE',
     // Product detail pages: /dp/<asin>
     tileRegex: /\/dp\//i,
-    // Amazon has no browsable phones shelf — the smartphones search grid IS
+    // Amazon has no browsable phones shelf â€” the smartphones search grid IS
     // its shelf. Cards: [data-component-type=s-search-result] (48/page,
     // sponsored included); brand from card text + /dp/ slugs. Next button
-    // truly navigates — firstCardId tolerates the context swap.
+    // truly navigates â€” firstCardId tolerates the context swap.
     devices: {
       url: 'https://www.amazon.ae/s?k=smartphones',
       card: '[data-component-type="s-search-result"]',
       title: '@self',
       nextButton: true,
-      pages: 2,
+      pages: 5,
     },
     search: {
       kind: 'grid',
@@ -268,12 +268,12 @@ const SITES = [
     reviews: { url: 'https://www.amazon.ae/s?k=samsung+galaxy+s26+ultra', findProduct: /s26[-\s]?ultra/i },
   },
   // NOTE noon.com (user requested 2026-07-14): NOT feasible with the current
-  // stack — noon resets automated HTTP/2 connections and hangs HTTP/1.1
+  // stack â€” noon resets automated HTTP/2 connections and hangs HTTP/1.1
   // (TLS-fingerprint bot detection) even from residential IPs. Needs a
   // stealth-patched browser or scraping API; parked until decided.
   // stc removed from the active roster 2026-07-06 (user request:
   // "remove for now"). Its tuning notes are preserved in DISABLED_SITES
-  // below — move the entry back into SITES to re-enable it.
+  // below â€” move the entry back into SITES to re-enable it.
   {
     id: 'sharafdg',
     name: 'Sharaf DG',
@@ -281,10 +281,10 @@ const SITES = [
     url: 'https://uae.sharafdg.com/',
     region: 'UAE',
     // Unified banner method (2026-07-08, user decision): count any distinct
-    // Samsung promotional placement — image creatives AND Samsung-linked
-    // tiles/CTAs — same definition as e& and du. Noise is handled generically:
+    // Samsung promotional placement â€” image creatives AND Samsung-linked
+    // tiles/CTAs â€” same definition as e& and du. Noise is handled generically:
     // lazy-load placeholder images are excluded by the global ICON_RE, and
-    // dedupe is by destination link — the hero swiper clones each slide ~3x
+    // dedupe is by destination link â€” the hero swiper clones each slide ~3x
     // and product tiles repeat across carousels, but clones share an href.
     bannerDedupe: 'href',
     // Placement class: anything linking to a product detail page is a product
@@ -297,7 +297,7 @@ const SITES = [
     // Category grid is Algolia-rendered: 48 cards/page under .algolia-item,
     // paged by a numbered widget (span.go-to-page[data-page], ~14 pages) that
     // REPLACES the grid per page. No visible grand-total counter. Cards carry
-    // no brand label — Samsung is matched on the .product-link title/href.
+    // no brand label â€” Samsung is matched on the .product-link title/href.
     devices: {
       url: 'https://uae.sharafdg.com/c/mobiles_tablets/mobiles/',
       card: '.algolia-item',
@@ -318,13 +318,13 @@ const SITES = [
   },
 ];
 
-// Parked site configs — not crawled. Kept so their WAF/selector notes survive.
+// Parked site configs â€” not crawled. Kept so their WAF/selector notes survive.
 const DISABLED_SITES = [
   {
     id: 'stc',
     name: 'stc',
     // /content/stc/sa/en.html 404s; this is the live English Devices page.
-    // stc sits behind an Imperva-style WAF — needs the stealth context.
+    // stc sits behind an Imperva-style WAF â€” needs the stealth context.
     // NOTE: stc renders its device grid lazily with SKU-based (non-branded)
     // image URLs, so brand only appears in copy. It currently yields 0 with the
     // default own-attribute matching; this is a prime per-site tuning target
@@ -353,7 +353,7 @@ const BROWSER = {
 const CONTAINER_REGEX = /swiper|slick|carousel|slider|hero|banner|promo|campaign/i;
 
 /* ------------------------------------------------------------------ *
- * Competition analysis (researched 2026-07: Statista/Omdia — Samsung
+ * Competition analysis (researched 2026-07: Statista/Omdia â€” Samsung
  * ~34% ME smartphone share, Honor #2 shipments and fastest-growing,
  * then Xiaomi/Transsion/Apple; TVs: Samsung vs TCL/Hisense/LG/Sony;
  * appliances: LG/Bosch/Hisense/Midea/Haier).
@@ -389,7 +389,7 @@ const BRANDS = [
   { id: 'jbl', label: 'JBL', regex: /\bjbl\b/i },
 ];
 
-// Product divisions — checked in order; first match wins, so accessories
+// Product divisions â€” checked in order; first match wins, so accessories
 // (watch/buds) are recognised before the generic phone patterns.
 const DIVISIONS = [
   { id: 'tv', label: 'TV & AV', regex: /\btvs?\b|television|qled|oled|bravia|soundbar|projector/i },
