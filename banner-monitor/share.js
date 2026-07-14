@@ -110,13 +110,6 @@ async function expandOnce(page, cfg) {
         ? Array.from(document.querySelectorAll(sel))
         : Array.from(document.querySelectorAll("button, a, [role='button']"));
       for (const n of candidates) {
-        // Never click an anchor that actually navigates — Shopify-style
-        // "Load more" links carry an href to ?page=2 and destroy the page
-        // context when the theme doesn't intercept the click (XHAWI/Omantel).
-        if (n.tagName === 'A') {
-          const href = n.getAttribute('href') || '';
-          if (href && !/^#|^javascript:/i.test(href)) continue;
-        }
         const txt = (n.innerText || n.getAttribute('aria-label') || '').trim();
         if ((sel || re.test(txt)) && n.offsetParent !== null) {
           n.scrollIntoView({ block: 'center' });
@@ -129,13 +122,18 @@ async function expandOnce(page, cfg) {
     .catch(() => false);
 
   if (!clicked) {
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
   }
 
-  // Poll for growth; grids load in over a few seconds.
+  // Poll for growth; grids load in over a few seconds. Some "show more"
+  // anchors truly navigate (Shopify ?page=2) — the count check tolerates the
+  // context swap, and a navigated page that merely REPLACED the grid won't
+  // grow past `before`, so the loop ends cleanly. JS-intercepted anchors that
+  // APPEND (Emax) keep expanding toward the 5-page target.
   for (let i = 0; i < 16; i++) {
     await page.waitForTimeout(500);
-    if ((await cardCount(page, cfg.card)) > before) return true;
+    const now = await cardCount(page, cfg.card).catch(() => 0);
+    if (now > before) return true;
   }
   return false;
 }

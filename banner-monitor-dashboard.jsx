@@ -933,6 +933,17 @@ export default function BannerMonitorDashboard() {
               <div style={S.chipRow}>
                 <Delta label="WoW" now={s.count} then={countWoW} />
                 <Delta label="MoM" now={s.count} then={countMoM} />
+                {s.competition && s.competition.s26Reviews && (
+                  <a
+                    href={s.competition.s26Reviews.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ ...S.chipInfo, textDecoration: 'none' }}
+                    title="Galaxy S26 Ultra rating on this site"
+                  >
+                    S26U ★{s.competition.s26Reviews.rating} · {s.competition.s26Reviews.count} reviews
+                  </a>
+                )}
               </div>
 
               {s.bannerTotal != null && s.bannerTotal > 0 && (

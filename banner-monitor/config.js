@@ -100,6 +100,7 @@ const SITES = [
       nextButton: true,
       pages: 5,
     },
+    reviews: { url: 'https://eshop.ooredoo.qa/en/products/samsung-galaxy-s26-ultra-5g' },
   },
   {
     id: 'vodafone',
@@ -138,8 +139,9 @@ const SITES = [
       url: 'https://uae.emaxme.com/shop-mobile',
       card: '.product_wrapper',
       title: '.product-desc',
-      pages: 3,
+      pages: 5,
     },
+    reviews: { url: 'https://uae.emaxme.com/search?text=galaxy s26 ultra', findProduct: /s26[-\s]?ultra/i },
     // Real text search at /search?text= — same multi-phrase method as Sharaf DG.
     search: {
       kind: 'grid',
@@ -222,8 +224,9 @@ const SITES = [
       url: 'https://www.xcite.com/mobile-phones/c',
       card: 'li.product',
       title: '[class*="ProductTile_productName"]',
-      pages: 3,
+      pages: 5,
     },
+    reviews: { url: 'https://www.xcite.com/samsung-s26-ultra-5g-phone-6-3-12gb-512gb-violet/p' },
     // Algolia search; relevance mixes accessories in, judged over 24 like the
     // other retailers.
     search: {
@@ -262,6 +265,7 @@ const SITES = [
       title: '@self',
       maxPositions: 24,
     },
+    reviews: { url: 'https://www.amazon.ae/s?k=samsung+galaxy+s26+ultra', findProduct: /s26[-\s]?ultra/i },
   },
   // NOTE noon.com (user requested 2026-07-14): NOT feasible with the current
   // stack — noon resets automated HTTP/2 connections and hangs HTTP/1.1
@@ -287,6 +291,9 @@ const SITES = [
     // tile; campaign pages (/samsung-galaxy-s26-series/, /new-launches/,
     // /brand/samsung/) stay banners.
     tileRegex: /\/product\//i,
+    reviews: {
+      url: 'https://uae.sharafdg.com/product/samsung-galaxy-s26-ultra-5g-256gb-12gb-ram-black-ai-phone-middle-east-version/',
+    },
     // Category grid is Algolia-rendered: 48 cards/page under .algolia-item,
     // paged by a numbered widget (span.go-to-page[data-page], ~14 pages) that
     // REPLACES the grid per page. No visible grand-total counter. Cards carry

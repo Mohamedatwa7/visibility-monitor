@@ -18,6 +18,7 @@ const { SITES } = require('./config');
 const { countSamsungBanners } = require('./scraper');
 const { measureDeviceShare, measureSearchShare } = require('./share');
 const { visionCheck } = require('./vision');
+const { fetchS26Reviews } = require('./reviews');
 const store = require('./store');
 const { buildChanges, sendAlert } = require('./notify');
 
@@ -135,9 +136,22 @@ async function runOnce(siteFilter) {
         ...tiles.matches.map((m) => ({ ...m, section: 'tile' })),
       ];
 
+      // Galaxy S26 Ultra reviews (rating + count) where the site has them.
+      let s26Reviews = null;
+      if (site.reviews) {
+        process.stdout.write(`        S26 Ultra reviews … `);
+        try {
+          s26Reviews = await withTimeout(fetchS26Reviews(site), `${site.name} S26 reviews`);
+          console.log(`★${s26Reviews.rating} (${s26Reviews.count} reviews, ${s26Reviews.via})`);
+        } catch (err) {
+          console.log(`FAILED — ${err.message}`);
+        }
+      }
+
       // Competition analysis: per-section brand breakdowns, division-level
       // head-to-heads, and catalog/search brand shares in one object.
       const competition = {
+        s26Reviews,
         hero: hero.brands,
         promo: promo.brands,
         tiles: tiles.brands,
