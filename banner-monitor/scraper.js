@@ -93,8 +93,14 @@ async function dismissConsent(page, site) {
         document.querySelectorAll("button, [role='button'], a, input[type='button'], input[type='submit']")
       );
       for (const n of nodes) {
+        // Never click an anchor that actually navigates — "I agree"-style
+        // LINKS lead to terms pages (Omantel's took us to a legal page).
+        if (n.tagName === 'A') {
+          const href = n.getAttribute('href') || '';
+          if (href && !/^#|^javascript:/i.test(href)) continue;
+        }
         const txt = (n.innerText || n.value || n.getAttribute('aria-label') || '').trim();
-        if (txt && re.test(txt)) {
+        if (txt && txt.length < 40 && re.test(txt)) {
           n.click();
           return txt;
         }

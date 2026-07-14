@@ -19,6 +19,7 @@ const SITES = [
   {
     id: 'e&',
     name: 'e& UAE',
+    type: 'operator',
     // Etisalat rebranded to e&; etisalat.ae now only serves a redirect splash.
     // The live consumer site is eand.ae.
     url: 'https://www.eand.ae/en/index.html',
@@ -43,6 +44,7 @@ const SITES = [
   {
     id: 'du',
     name: 'du',
+    type: 'operator',
     url: 'https://www.du.ae/personal',
     region: 'UAE',
     // Placement classes: du has NO product tiles (user rule 2026-07-08) —
@@ -79,6 +81,7 @@ const SITES = [
   {
     id: 'ooredoo',
     name: 'Ooredoo',
+    type: 'operator',
     // Re-enabled 2026-07-13 (user request). Root redirects to /web/en/;
     // sits behind an F5 BIG-IP WAF — needs the stealth context.
     url: 'https://www.ooredoo.qa/web/en/',
@@ -101,6 +104,7 @@ const SITES = [
   {
     id: 'vodafone',
     name: 'Vodafone Qatar',
+    type: 'operator',
     url: 'https://www.vodafone.qa/en/home',
     region: 'Qatar',
     timezoneId: 'Asia/Qatar',
@@ -124,6 +128,7 @@ const SITES = [
   {
     id: 'emax',
     name: 'Emax',
+    type: 'retailer',
     url: 'https://www.emaxme.com/', // redirects to uae.emaxme.com
     region: 'UAE',
     // Purchasable product URLs: /buy-<product>-p-<id>
@@ -145,12 +150,98 @@ const SITES = [
       maxPositions: 24,
     },
   },
+  {
+    id: 'omantel',
+    name: 'Omantel',
+    type: 'operator',
+    url: 'https://www.omantel.om/en/personal',
+    region: 'Oman',
+    timezoneId: 'Asia/Muscat',
+    locale: 'en-OM',
+    // NOTE: Omantel's cookie bar has "agree"-style LINKS to its terms pages —
+    // the global consent-dismisser skips navigating anchors because of this.
+    // Devices are sold via the XHAWI marketplace partner (Shopify): the
+    // Omantel Store collection. Brand comes from /products/ slugs; the grid
+    // grows via a Load More button (generic expandOnce handles it).
+    devices: {
+      url: 'https://www.xhawi.com/collections/omantel-store-collection',
+      card: '.loadmore-item',
+      pages: 3,
+    },
+  },
+  {
+    id: 'stc-bh',
+    name: 'stc Bahrain',
+    type: 'operator',
+    url: 'https://www.stc.com.bh/',
+    region: 'Bahrain',
+    timezoneId: 'Asia/Bahrain',
+    locale: 'en-BH',
+    // OpenCart shop; 32 cards render with a load-more button. Product hrefs
+    // are opaque ids (product_id=7149) — brand lives in the card text.
+    devices: {
+      url: 'https://shop.stc.com.bh/index.php?route=product/category&path=102&allproducts=1',
+      card: '.rvl-product-element',
+      title: '@self',
+      loadMoreSelector: '.rvl-load-more-btn',
+      pages: 4,
+    },
+  },
+  {
+    id: 'zain-kw',
+    name: 'Zain Kuwait',
+    type: 'operator',
+    url: 'https://www.kw.zain.com/en/',
+    region: 'Kuwait',
+    timezoneId: 'Asia/Kuwait',
+    locale: 'en-KW',
+    // Hero carousel renders the same creative in several blocks AND as
+    // separate image/CTA elements pointing at one product — dedupe by
+    // destination so one campaign counts once.
+    bannerDedupe: 'href',
+    // Liferay shop; /en/shop/devices renders 15 product cards (devices +
+    // accessories) with brand in the card text and product-slug hrefs.
+    devices: {
+      url: 'https://www.kw.zain.com/en/shop/devices',
+      card: '.products-grid-item',
+      title: '@self',
+      pages: 3,
+    },
+  },
+  {
+    id: 'xcite',
+    name: 'Xcite',
+    type: 'retailer',
+    url: 'https://www.xcite.com/',
+    region: 'Kuwait',
+    timezoneId: 'Asia/Kuwait',
+    locale: 'en-KW',
+    // Product pages end in /p — purchasable tiles.
+    tileRegex: /\/p(?:\?|\s|$)/i,
+    devices: {
+      url: 'https://www.xcite.com/mobile-phones/c',
+      card: 'li.product',
+      title: '[class*="ProductTile_productName"]',
+      pages: 3,
+    },
+    // Algolia search; relevance mixes accessories in, judged over 24 like the
+    // other retailers.
+    search: {
+      kind: 'grid',
+      url: 'https://www.xcite.com/search?query={q}',
+      terms: ['phones', 'smartphone', 'mobile phone', '5g phone'],
+      card: 'li.product',
+      title: '[class*="ProductTile_productName"]',
+      maxPositions: 24,
+    },
+  },
   // stc removed from the active roster 2026-07-06 (user request:
   // "remove for now"). Its tuning notes are preserved in DISABLED_SITES
   // below — move the entry back into SITES to re-enable it.
   {
     id: 'sharafdg',
     name: 'Sharaf DG',
+    type: 'retailer',
     url: 'https://uae.sharafdg.com/',
     region: 'UAE',
     // Unified banner method (2026-07-08, user decision): count any distinct

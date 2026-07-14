@@ -44,6 +44,7 @@ router.get('/api/sites', async (_req, res) => {
         name: site.name,
         url: site.url,
         region: site.region,
+        type: site.type || 'operator',
         count: latest ? (vc ? reconcile(latest.count, vc.hero) : latest.count) : null,
         bannerTotal: latest ? (latest.banner_total == null ? null : latest.banner_total) : null,
         promoCount: latest
@@ -78,6 +79,14 @@ router.get('/api/sites', async (_req, res) => {
           .map((r) => ({
             run_at: r.run_at,
             count: r.count,
+            // Raw numerators/denominators so the dashboard can compute
+            // properly weighted aggregate shares (KPIs) at any point in time.
+            heroN: r.count,
+            heroD: r.banner_total == null ? null : r.banner_total,
+            devN: r.device_share ? r.device_share.samsung : null,
+            devD: r.device_share ? r.device_share.total : null,
+            searchN: r.search_share ? r.search_share.samsung : null,
+            searchD: r.search_share ? r.search_share.total : null,
             // Per-run brand share maps (%) for the two competition trend
             // graphs: homepage placements (hero+promo+tiles) and device catalog.
             ...(() => {

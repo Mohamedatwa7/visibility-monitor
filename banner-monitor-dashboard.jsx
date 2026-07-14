@@ -671,6 +671,8 @@ export default function BannerMonitorDashboard() {
   const [error, setError] = useState(null);
   const [savedNote, setSavedNote] = useState('');
   const [assetsSite, setAssetsSite] = useState(null);
+  const [countryFilter, setCountryFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
 
   const loadSites = useCallback(async () => {
     const { sites } = await api('/api/sites');
@@ -750,37 +752,54 @@ export default function BannerMonitorDashboard() {
     }
   }, [recipientText]);
 
+  // ---- filters (country + operators/retailers) ----
+  const countries = useMemo(() => Array.from(new Set(sites.map((s) => s.region))).sort(), [sites]);
+  const visible = useMemo(
+    () =>
+      sites.filter(
+        (s) => (countryFilter === 'all' || s.region === countryFilter) && (typeFilter === 'all' || s.type === typeFilter)
+      ),
+    [sites, countryFilter, typeFilter]
+  );
+  const visibleIds = useMemo(() => new Set(visible.map((s) => s.id)), [visible]);
+
   // ---- headline KPIs with WoW deltas ----
   const kpis = useMemo(() => {
-    const totalBanners = sites.reduce((n, s) => n + (typeof s.count === 'number' ? s.count : 0), 0);
-    const totalOnPages = sites.reduce((n, s) => n + (typeof s.bannerTotal === 'number' ? s.bannerTotal : 0), 0);
-    const bannerSharePct = totalOnPages ? Math.round((totalBanners / totalOnPages) * 1000) / 10 : null;
-    const bannersWoWThen = sites.reduce((acc, s) => {
-      const v = valueAgo(s.history, 'count', 7);
-      return v == null ? acc : (acc || 0) + v;
-    }, null);
-
-    const avg = (key) => {
-      const vals = sites.map((s) => (s[key] ? s[key].sharePct : null)).filter((v) => v != null);
-      return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
-    };
-    const avgAgo = (key, days) => {
-      const vals = sites.map((s) => valueAgo(s.history, key, days)).filter((v) => v != null);
-      return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
+    // Weighted aggregate share across the FILTERED sites: sum of Samsung
+    // counts over sum of totals, now and 7 days ago (from raw history
+    // numerators/denominators), so every KPI is a true share, not an average
+    // of percentages.
+    const aggShare = (sitesArr, nKey, dKey, daysAgo) => {
+      let n = 0;
+      let d = 0;
+      for (const s of sitesArr) {
+        const h = s.history || [];
+        let entry = null;
+        if (daysAgo == null) {
+          entry = h[h.length - 1] || null;
+        } else if (h.length) {
+          const latestTs = new Date(h[h.length - 1].run_at).getTime();
+          const cutoff = latestTs - daysAgo * DAY;
+          for (const e of h) if (new Date(e.run_at).getTime() <= cutoff && e[dKey]) entry = e;
+        }
+        if (entry && entry[dKey]) {
+          n += entry[nKey] || 0;
+          d += entry[dKey];
+        }
+      }
+      return d ? Math.round((n / d) * 1000) / 10 : null;
     };
 
     return {
-      totalBanners,
-      totalOnPages,
-      bannerSharePct,
-      bannersWoWThen,
-      avgDevice: avg('deviceShare'),
-      avgDeviceWoW: avgAgo('deviceSharePct', 7),
-      avgSearch: avg('searchShare'),
-      avgSearchWoW: avgAgo('searchSharePct', 7),
+      heroShare: aggShare(visible, 'heroN', 'heroD', null),
+      heroShareWoW: aggShare(visible, 'heroN', 'heroD', 7),
+      shelfShare: aggShare(visible, 'devN', 'devD', null),
+      shelfShareWoW: aggShare(visible, 'devN', 'devD', 7),
+      searchShare: aggShare(visible, 'searchN', 'searchD', null),
+      searchShareWoW: aggShare(visible, 'searchN', 'searchD', 7),
       lastRun: sites.reduce((t, s) => (s.lastRunAt && (!t || s.lastRunAt > t) ? s.lastRunAt : t), null),
     };
-  }, [sites]);
+  }, [sites, visible]);
 
   const S = styles;
 
@@ -809,44 +828,77 @@ export default function BannerMonitorDashboard() {
 
       {error && <div style={S.error}>{error}</div>}
 
-      {/* ---- KPI strip ---- */}
+      {/* ---- filters ---- */}
+      <section style={S.filterBar}>
+        <div style={S.filterGroup}>
+          <span style={S.filterLabel}>Country</span>
+          {['all', ...countries].map((c) => (
+            <button
+              key={c}
+              style={{ ...S.filterChip, ...(countryFilter === c ? S.filterChipOn : {}) }}
+              onClick={() => setCountryFilter(c)}
+            >
+              {c === 'all' ? 'All' : c}
+            </button>
+          ))}
+        </div>
+        <div style={S.filterGroup}>
+          <span style={S.filterLabel}>Type</span>
+          {[
+            ['all', 'All'],
+            ['operator', 'Operators'],
+            ['retailer', 'Retailers'],
+          ].map(([v, label]) => (
+            <button
+              key={v}
+              style={{ ...S.filterChip, ...(typeFilter === v ? S.filterChipOn : {}) }}
+              onClick={() => setTypeFilter(v)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span style={S.filterCount}>
+          {visible.length} of {sites.length} sites
+        </span>
+      </section>
+
+      {/* ---- KPI strip: Samsung's aggregate shares across the filtered sites ---- */}
       <section style={S.kpiRow}>
         <div style={S.kpi}>
-          <div style={S.kpiLabel}>Samsung hero banners live</div>
-          <div style={S.kpiValue}>{kpis.totalBanners}</div>
+          <div style={S.kpiLabel}>Share of hero banners</div>
+          <div style={S.kpiValue}>{kpis.heroShare == null ? '—' : `${kpis.heroShare}%`}</div>
           <div style={S.kpiChips}>
-            <Delta label="WoW" now={kpis.totalBanners} then={kpis.bannersWoWThen} />
+            <Delta label="WoW" now={kpis.heroShare} then={kpis.heroShareWoW} unit=" pt" />
           </div>
-          {kpis.bannerSharePct != null && (
-            <div style={S.kpiSub}>
-              {kpis.bannerSharePct}% of the {kpis.totalOnPages} hero banners across all landing pages
-            </div>
-          )}
+          <div style={S.kpiSub}>Samsung's share of hero-banner slots on the landing pages</div>
         </div>
         <div style={S.kpi}>
-          <div style={S.kpiLabel}>Avg device-page share</div>
-          <div style={S.kpiValue}>{kpis.avgDevice == null ? '—' : `${kpis.avgDevice}%`}</div>
+          <div style={S.kpiLabel}>Share of shelf</div>
+          <div style={S.kpiValue}>{kpis.shelfShare == null ? '—' : `${kpis.shelfShare}%`}</div>
           <div style={S.kpiChips}>
-            <Delta label="WoW" now={kpis.avgDevice} then={kpis.avgDeviceWoW} unit=" pt" />
+            <Delta label="WoW" now={kpis.shelfShare} then={kpis.shelfShareWoW} unit=" pt" />
           </div>
+          <div style={S.kpiSub}>Samsung devices among all devices on the catalog shelves</div>
         </div>
         <div style={S.kpi}>
-          <div style={S.kpiLabel}>Avg search share</div>
-          <div style={S.kpiValue}>{kpis.avgSearch == null ? '—' : `${kpis.avgSearch}%`}</div>
+          <div style={S.kpiLabel}>Share of search</div>
+          <div style={S.kpiValue}>{kpis.searchShare == null ? '—' : `${kpis.searchShare}%`}</div>
           <div style={S.kpiChips}>
-            <Delta label="WoW" now={kpis.avgSearch} then={kpis.avgSearchWoW} unit=" pt" />
+            <Delta label="WoW" now={kpis.searchShare} then={kpis.searchShareWoW} unit=" pt" />
           </div>
+          <div style={S.kpiSub}>Samsung's share of results for common phone searches</div>
         </div>
         <div style={S.kpi}>
           <div style={S.kpiLabel}>Sites monitored</div>
-          <div style={S.kpiValue}>{sites.length}</div>
-          <div style={S.kpiSub}>{sites.map((s) => s.name).join(' · ')}</div>
+          <div style={S.kpiValue}>{visible.length}</div>
+          <div style={S.kpiSub}>{visible.map((s) => s.name).join(' · ')}</div>
         </div>
       </section>
 
       {/* ---- per-site cards ---- */}
       <section style={S.grid}>
-        {sites.map((s) => {
+        {visible.map((s) => {
           const countWoW = valueAgo(s.history, 'count', 7);
           const countMoM = valueAgo(s.history, 'count', 30);
           const banWoW = valueAgo(s.history, 'bannerSharePct', 7);
@@ -998,7 +1050,7 @@ export default function BannerMonitorDashboard() {
       </section>
 
       {/* ---- competition analysis ---- */}
-      {sites.some((s) => s.competition) && (
+      {visible.some((s) => s.competition) && (
         <section style={{ marginBottom: 24 }}>
           <div style={S.sectionHead}>
             <h2 style={{ ...S.h2, margin: 0 }}>Competition analysis</h2>
@@ -1007,7 +1059,7 @@ export default function BannerMonitorDashboard() {
             </span>
           </div>
           <div style={S.grid}>
-            {sites.map((s) => (
+            {visible.map((s) => (
               <CompetitionCard key={s.id} site={s} />
             ))}
           </div>
@@ -1029,7 +1081,7 @@ export default function BannerMonitorDashboard() {
               </tr>
             </thead>
             <tbody>
-              {log.map((e) => (
+              {log.filter((e) => visibleIds.has(e.site_id)).map((e) => (
                 <tr key={e.id}>
                   <td style={S.td}>{fmtTime(e.run_at)}</td>
                   <td style={S.td}>{e.site}</td>
@@ -1141,6 +1193,31 @@ const styles = {
     marginBottom: 16,
   },
 
+  filterBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 18,
+    flexWrap: 'wrap',
+    background: '#fff',
+    border: '1px solid #e2e8f0',
+    borderRadius: 12,
+    padding: '10px 16px',
+    marginBottom: 14,
+  },
+  filterGroup: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  filterLabel: { fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', marginRight: 2 },
+  filterChip: {
+    background: '#f8fafc',
+    color: '#475569',
+    border: '1px solid #e2e8f0',
+    borderRadius: 999,
+    padding: '4px 12px',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  filterChipOn: { background: '#1428a0', color: '#fff', borderColor: '#1428a0' },
+  filterCount: { marginLeft: 'auto', fontSize: 12, color: '#94a3b8' },
   kpiRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))',
