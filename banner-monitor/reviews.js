@@ -9,7 +9,7 @@
  * Falls back to Amazon's DOM ids and a plain-text pattern.
  */
 
-const { launchStealthContext, gotoWithRetry, dismissConsent, detectBlock } = require('./scraper');
+const { launchStealthContext, gotoWithRetry, dismissConsent, detectBlock, autoScroll } = require('./scraper');
 const { BROWSER } = require('./config');
 
 async function fetchS26Reviews(site) {
@@ -37,8 +37,44 @@ async function fetchS26Reviews(site) {
       await page.waitForTimeout(1500);
     }
 
+    // The authoritative summary (avg score + total ratings) lives in the
+    // reviews section at the BOTTOM of the product page — scroll fully so
+    // lazy sections render, then read compact review/rating widgets and
+    // prefer the lowest one on the page.
+    await autoScroll(page);
+    await page.waitForTimeout(1500);
+
     const data = await page.evaluate(() => {
-      // 1) JSON-LD AggregateRating
+      const candidates = [];
+      document
+        .querySelectorAll('[class*="review" i], [class*="rating" i], [id*="review" i], [id*="rating" i]')
+        .forEach((el) => {
+          const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+          if (!t || t.length > 400) return; // summary widgets are compact
+          const c = /([\d,]+)\s*(?:global ratings|total ratings|ratings|reviews)/i.exec(t);
+          if (!c) return;
+          const r =
+            /([0-5](?:\.\d)?)\s*(?:out of\s*5|\/\s*5|based)/i.exec(t) || /(?:^|\s)([0-5]\.\d)(?:\s|$)/.exec(t);
+          if (!r) return;
+          const rating = parseFloat(r[1]);
+          const count = parseInt(c[1].replace(/,/g, ''), 10);
+          if (rating >= 0 && rating <= 5 && count > 0) {
+            candidates.push({ rating, count, y: el.getBoundingClientRect().top + window.scrollY });
+          }
+        });
+      if (candidates.length) {
+        candidates.sort((a, b) => b.y - a.y); // bottom-most first
+        const best = candidates[0];
+        return { rating: best.rating, count: best.count, via: 'review-section' };
+      }
+      // Fallbacks: Amazon's header widget, then JSON-LD.
+      const pop = document.querySelector('#acrPopover');
+      const cnt = document.querySelector('#acrCustomerReviewText');
+      if (pop && cnt) {
+        const r = /([0-5](?:\.\d)?)/.exec(pop.getAttribute('title') || pop.textContent || '');
+        const c = /([\d,]+)/.exec(cnt.textContent || '');
+        if (r) return { rating: parseFloat(r[1]), count: c ? parseInt(c[1].replace(/,/g, ''), 10) : 0, via: 'amazon-dom' };
+      }
       const dig = (node) => {
         if (!node || typeof node !== 'object') return null;
         if (node.aggregateRating) return node.aggregateRating;
@@ -60,19 +96,6 @@ async function fetchS26Reviews(site) {
           }
         } catch {}
       }
-      // 2) Amazon DOM
-      const pop = document.querySelector('#acrPopover');
-      const cnt = document.querySelector('#acrCustomerReviewText');
-      if (pop && cnt) {
-        const r = /([0-5](?:\.\d)?)/.exec(pop.getAttribute('title') || pop.textContent || '');
-        const c = /([\d,]+)/.exec(cnt.textContent || '');
-        if (r) return { rating: parseFloat(r[1]), count: c ? parseInt(c[1].replace(/,/g, ''), 10) : 0, via: 'amazon-dom' };
-      }
-      // 3) plain text
-      const body = (document.body.innerText || '').slice(0, 8000);
-      const r = /([0-5](?:\.\d)?)\s*(?:out of|\/)\s*5/i.exec(body);
-      const c = /([\d,]+)\s*(?:ratings|reviews)/i.exec(body);
-      if (r && c) return { rating: parseFloat(r[1]), count: parseInt(c[1].replace(/,/g, ''), 10), via: 'text' };
       return null;
     });
 
