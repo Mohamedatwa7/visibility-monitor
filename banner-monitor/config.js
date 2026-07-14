@@ -235,6 +235,38 @@ const SITES = [
       maxPositions: 24,
     },
   },
+  {
+    id: 'amazon',
+    name: 'Amazon UAE',
+    type: 'retailer',
+    url: 'https://www.amazon.ae/',
+    region: 'UAE',
+    // Product detail pages: /dp/<asin>
+    tileRegex: /\/dp\//i,
+    // Amazon has no browsable phones shelf — the smartphones search grid IS
+    // its shelf. Cards: [data-component-type=s-search-result] (48/page,
+    // sponsored included); brand from card text + /dp/ slugs. Next button
+    // truly navigates — firstCardId tolerates the context swap.
+    devices: {
+      url: 'https://www.amazon.ae/s?k=smartphones',
+      card: '[data-component-type="s-search-result"]',
+      title: '@self',
+      nextButton: true,
+      pages: 2,
+    },
+    search: {
+      kind: 'grid',
+      url: 'https://www.amazon.ae/s?k={q}',
+      terms: ['phones', 'smartphone', 'mobile phone', '5g phone'],
+      card: '[data-component-type="s-search-result"]',
+      title: '@self',
+      maxPositions: 24,
+    },
+  },
+  // NOTE noon.com (user requested 2026-07-14): NOT feasible with the current
+  // stack — noon resets automated HTTP/2 connections and hangs HTTP/1.1
+  // (TLS-fingerprint bot detection) even from residential IPs. Needs a
+  // stealth-patched browser or scraping API; parked until decided.
   // stc removed from the active roster 2026-07-06 (user request:
   // "remove for now"). Its tuning notes are preserved in DISABLED_SITES
   // below — move the entry back into SITES to re-enable it.

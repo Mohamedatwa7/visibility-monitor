@@ -39,7 +39,7 @@ jobs:
         # sharafdg and emax are NOT scraped here: their Cloudflare challenges
         # datacenter IPs. They run from a local machine via Task Scheduler
         # instead (run-sharafdg-cloud.cmd), writing to the same Supabase.
-        run: node banner-monitor/run.js "e&" du ooredoo vodafone omantel stc-bh zain-kw xcite
+        run: node banner-monitor/run.js "e&" du ooredoo vodafone omantel stc-bh zain-kw xcite amazon
 
       # Screenshots are uploaded to Supabase Storage by the run itself; keep
       # the raw artifacts too for 7 days as a debugging fallback.

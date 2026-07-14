@@ -141,12 +141,16 @@ async function expandOnce(page, cfg) {
 }
 
 async function firstCardId(page, cardSel) {
-  return page.evaluate((sel) => {
-    const card = document.querySelector(sel);
-    if (!card) return null;
-    const a = card.tagName === 'A' ? card : card.querySelector('a[href]');
-    return (a && a.getAttribute('href')) || (card.textContent || '').slice(0, 120);
-  }, cardSel);
+  // .catch: pagination that truly navigates (Amazon's Next) destroys the
+  // execution context mid-poll — treat as "not readable yet", not an error.
+  return page
+    .evaluate((sel) => {
+      const card = document.querySelector(sel);
+      if (!card) return null;
+      const a = card.tagName === 'A' ? card : card.querySelector('a[href]');
+      return (a && a.getAttribute('href')) || (card.textContent || '').slice(0, 120);
+    }, cardSel)
+    .catch(() => null);
 }
 
 // Numbered pager that REPLACES the grid per page (Sharaf DG's Algolia widget:

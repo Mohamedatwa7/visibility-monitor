@@ -320,7 +320,13 @@ async function launchStealthContext(site) {
   const browser = await chromium.launch({
     headless: true,
     // Hide the most obvious automation tells so basic WAF checks pass.
-    args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+      // noon.com resets automated HTTP/2 connections (TLS/h2 fingerprinting);
+      // downgrading to HTTP/1.1 gets a normal response.
+      ...(site.disableHttp2 ? ['--disable-http2'] : []),
+    ],
   });
   const context = await browser.newContext({
     userAgent: BROWSER.userAgent,
