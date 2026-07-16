@@ -15,7 +15,15 @@
  *   getRecentRuns(limit)    -> recent runs across all sites (newest first) — for the log feed
  *   getRecipients()         -> string[] of alert email recipients
  *   setRecipients(list)     -> persists + returns string[]
+ *   mergeSocialPosts(siteId, posts) -> upsert classified social posts for a site
+ *   getSocialPosts()        -> { siteId: [post, …] } (all sites, all platforms)
  *   backend                 -> 'supabase' | 'sqlite'
+ *
+ * Social posts use a compact shape shared by both backends:
+ *   { platform, id, url, at, brands[], samsung, s26, likes, comments, views }
+ * Supabase stores them as one JSON blob per site in app_settings
+ * (key 'social:<siteId>') — the project's REST key cannot run DDL, so no
+ * dedicated table is required.
  */
 
 const path = require('path');
@@ -56,6 +64,22 @@ function createSqliteStore() {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS social_posts (
+      site_id      TEXT NOT NULL,
+      platform     TEXT NOT NULL,
+      external_id  TEXT NOT NULL,
+      url          TEXT,
+      published_at TEXT NOT NULL,
+      brands       TEXT NOT NULL DEFAULT '[]',
+      samsung      INTEGER NOT NULL DEFAULT 0,
+      s26          INTEGER NOT NULL DEFAULT 0,
+      likes        INTEGER,
+      comments     INTEGER,
+      views        INTEGER,
+      scraped_at   TEXT,
+      PRIMARY KEY (platform, external_id)
+    );
+    CREATE INDEX IF NOT EXISTS social_posts_site_idx ON social_posts (site_id, published_at DESC);
   `);
 
   // Migration: device/search shelf-share columns (added 2026-07). Guarded so
@@ -147,6 +171,53 @@ function createSqliteStore() {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`
       ).run(JSON.stringify(clean));
       return clean;
+    },
+    async mergeSocialPosts(siteId, posts) {
+      const stmt = db.prepare(
+        `INSERT INTO social_posts (site_id, platform, external_id, url, published_at, brands, samsung, s26, likes, comments, views, scraped_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(platform, external_id) DO UPDATE SET
+           url = excluded.url, brands = excluded.brands, samsung = excluded.samsung,
+           s26 = excluded.s26, likes = excluded.likes, comments = excluded.comments,
+           views = excluded.views, scraped_at = excluded.scraped_at`
+      );
+      const now = new Date().toISOString();
+      for (const p of posts || []) {
+        stmt.run(
+          siteId,
+          p.platform,
+          String(p.id),
+          p.url || null,
+          p.at,
+          JSON.stringify(p.brands || []),
+          p.samsung ? 1 : 0,
+          p.s26 ? 1 : 0,
+          p.likes | 0,
+          p.comments | 0,
+          p.views | 0,
+          now
+        );
+      }
+      return (posts || []).length;
+    },
+    async getSocialPosts() {
+      const rows = db.prepare('SELECT * FROM social_posts ORDER BY published_at').all();
+      const out = {};
+      for (const r of rows) {
+        (out[r.site_id] = out[r.site_id] || []).push({
+          platform: r.platform,
+          id: r.external_id,
+          url: r.url,
+          at: r.published_at,
+          brands: safeJson(r.brands, []),
+          samsung: !!r.samsung,
+          s26: !!r.s26,
+          likes: r.likes || 0,
+          comments: r.comments || 0,
+          views: r.views || 0,
+        });
+      }
+      return out;
     },
     // Local mode keeps screenshots on disk — nothing to upload.
     async uploadScreenshot() {
@@ -240,6 +311,33 @@ function createSupabaseStore() {
         .upsert({ key: 'recipients', value: JSON.stringify(clean) }, { onConflict: 'key' });
       if (error) throw error;
       return clean;
+    },
+    // Social posts live as one JSON blob per site in app_settings — the REST
+    // service key cannot CREATE TABLE, and the volume (a few hundred posts per
+    // brand) is comfortably inside a text row. Merge = dedupe by platform+id,
+    // newest scrape wins.
+    async mergeSocialPosts(siteId, posts) {
+      const key = `social:${siteId}`;
+      const { data, error } = await supabase.from('app_settings').select('value').eq('key', key).limit(1);
+      if (error) throw error;
+      const existing = data && data[0] && data[0].value ? safeJson(data[0].value, []) : [];
+      const byId = new Map(existing.map((p) => [`${p.platform}:${p.id}`, p]));
+      for (const p of posts || []) byId.set(`${p.platform}:${p.id}`, p);
+      const merged = [...byId.values()].sort((a, b) => (a.at < b.at ? -1 : 1));
+      const { error: upErr } = await supabase
+        .from('app_settings')
+        .upsert({ key, value: JSON.stringify(merged) }, { onConflict: 'key' });
+      if (upErr) throw upErr;
+      return merged.length;
+    },
+    async getSocialPosts() {
+      const { data, error } = await supabase.from('app_settings').select('key,value').like('key', 'social:%');
+      if (error) throw error;
+      const out = {};
+      for (const row of data || []) {
+        out[row.key.slice('social:'.length)] = safeJson(row.value, []);
+      }
+      return out;
     },
     // Upload a local screenshot to the public 'screenshots' bucket and return
     // its public URL (stored in screenshot_path so the dashboard can link it

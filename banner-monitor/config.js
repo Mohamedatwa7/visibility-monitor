@@ -424,6 +424,28 @@ function divisionOf(text) {
   return 'other';
 }
 
+/* ------------------------------------------------------------------ *
+ * Official social accounts per site — Instagram / TikTok / Facebook.
+ * Discovered from each site's own footer links (2026-07-16), gaps filled
+ * from verified search results. A missing platform means the company
+ * operates no account there (du, Emax and Amazon UAE have no TikTok).
+ * Used by social.js (Apify post scrapers + share-of-voice analysis).
+ * ------------------------------------------------------------------ */
+const SOCIAL_HANDLES = {
+  'e&': { instagram: 'eanduae', tiktok: 'eanduae', facebook: 'eAndUAE' },
+  du: { instagram: 'du', facebook: 'du' },
+  ooredoo: { instagram: 'ooredooqatar', tiktok: 'ooredooqatar', facebook: 'ooredooqatar' },
+  vodafone: { instagram: 'vodafoneqatar', tiktok: 'vodafoneqatar', facebook: 'vodafoneQatar' },
+  emax: { instagram: 'emaxstores', facebook: 'emaxme' },
+  omantel: { instagram: 'omantel', tiktok: 'omantel', facebook: 'omantel.om' },
+  'stc-bh': { instagram: 'stc_bhr', tiktok: 'stc_bhr', facebook: 'stc.bhr' },
+  'zain-kw': { instagram: 'zainkuwait', tiktok: 'zainkuwait', facebook: 'zainkuwait' },
+  xcite: { instagram: 'xcitealghanim', tiktok: 'xcitealghanim', facebook: 'XcitebyAlghanim' },
+  amazon: { instagram: 'amazonae', facebook: 'amazonae' },
+  sharafdg: { instagram: 'sharafdguae_official', tiktok: 'sharafdg_official', facebook: 'SharafDG' },
+};
+for (const s of SITES) if (SOCIAL_HANDLES[s.id]) s.social = SOCIAL_HANDLES[s.id];
+
 // Alerting behaviour: 'change' = alert on any count change, 'drop' = only when count falls.
 const ALERT_ON = (process.env.ALERT_ON || 'change').toLowerCase() === 'drop' ? 'drop' : 'change';
 

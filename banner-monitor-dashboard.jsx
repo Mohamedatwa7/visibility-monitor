@@ -674,6 +674,93 @@ function TermChips({ searchShare }) {
   );
 }
 
+/* ---------- social share of voice ---------- */
+
+const PLATFORM_LABELS = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
+
+// One row per company: how much of its social feed (IG/TikTok/FB posts since
+// Jan 2026) features Samsung vs competitor brands, and Galaxy S26 posts.
+function SocialRow({ s }) {
+  const S = styles;
+  const pct = (n) => (s.total ? Math.round((n / s.total) * 1000) / 10 : 0);
+  const samsungPct = pct(s.samsung);
+  const rivalPct = pct(s.competitor);
+  const topRivals = Object.entries(s.brands || {})
+    .filter(([b]) => b !== 'samsung')
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+  const platforms = ['instagram', 'tiktok', 'facebook']
+    .map((pf) => (s.byPlatform[pf] ? `${PLATFORM_LABELS[pf]} ${s.byPlatform[pf].total}` : null))
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div style={S.socialRow}>
+      <div style={S.socialSite}>
+        <div style={S.socialName}>{s.name}</div>
+        <div style={S.socialPlatforms}>{platforms || 'no posts captured yet'}</div>
+      </div>
+      <div style={S.socialBarWrap}>
+        <div style={S.socialBar} title={`Samsung ${samsungPct}% · competitors ${rivalPct}% · other ${Math.max(0, Math.round((100 - samsungPct - rivalPct) * 10) / 10)}%`}>
+          <div style={{ ...S.socialSeg, width: `${samsungPct}%`, background: '#1428a0' }} />
+          <div style={{ ...S.socialSeg, width: `${rivalPct}%`, background: '#e11d48' }} />
+        </div>
+        <div style={S.socialCaption}>
+          Samsung <strong>{s.samsung}</strong> ({samsungPct}%) · competitors <strong>{s.competitor}</strong> ({rivalPct}%)
+          {topRivals.length > 0 && <span style={{ color: '#94a3b8' }}> — {topRivals.map(([b, n]) => `${brandMeta(b).label} ${n}`).join(', ')}</span>}
+        </div>
+      </div>
+      <span style={S.chipInfo} title="Posts mentioning the Galaxy S26 series">
+        S26 · {s.s26}
+      </span>
+      <div style={S.socialNums}>
+        <div style={S.socialTotal}>{s.total}</div>
+        <div style={S.countLabel}>posts</div>
+      </div>
+    </div>
+  );
+}
+
+function SocialSection({ social, visible }) {
+  const S = styles;
+  if (!social || !Array.isArray(social.sites)) return null;
+  const byId = Object.fromEntries(social.sites.map((s) => [s.id, s]));
+  // Same order as the site cards (operators first, grouped by country).
+  const rows = visible.map((v) => byId[v.id]).filter((s) => s && s.total > 0);
+  if (!rows.length) return null;
+  const sum = (k) => rows.reduce((n, r) => n + r[k], 0);
+  const total = sum('total');
+  const samsung = sum('samsung');
+  const s26 = sum('s26');
+  const sinceLabel = new Date(social.since).toLocaleString(undefined, { month: 'short', year: 'numeric' });
+
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <div style={S.sectionHead}>
+        <h2 style={{ ...S.h2, margin: 0 }}>Social media — share of voice</h2>
+        <span style={S.sectionSub}>
+          Instagram, TikTok & Facebook posts by each company since {sinceLabel} — Samsung vs competitor brands
+        </span>
+      </div>
+      <div style={S.panel}>
+        <div style={S.socialSummary}>
+          <span><strong>{total}</strong> posts tracked</span>
+          <span>
+            <i style={{ ...S.legendDot, background: '#1428a0' }} /> Samsung <strong>{samsung}</strong> ({total ? Math.round((samsung / total) * 1000) / 10 : 0}%)
+          </span>
+          <span>
+            <i style={{ ...S.legendDot, background: '#e11d48' }} /> competitor brands
+          </span>
+          <span style={S.chipInfo}>Galaxy S26 posts · {s26}</span>
+        </div>
+        {rows.map((s) => (
+          <SocialRow key={s.id} s={s} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /* ---------- main component ---------- */
 
 export default function BannerMonitorDashboard() {
@@ -697,6 +784,15 @@ export default function BannerMonitorDashboard() {
     setSites(sites);
   }, []);
 
+  const [social, setSocial] = useState(null);
+  const loadSocial = useCallback(async () => {
+    try {
+      setSocial(await api('/api/social'));
+    } catch {
+      /* section simply hides until social data exists */
+    }
+  }, []);
+
   const loadLog = useCallback(async () => {
     try {
       const { events } = await api('/api/log?limit=30');
@@ -715,14 +811,14 @@ export default function BannerMonitorDashboard() {
   useEffect(() => {
     (async () => {
       try {
-        await Promise.all([loadSites(), loadLog(), loadRecipients()]);
+        await Promise.all([loadSites(), loadLog(), loadRecipients(), loadSocial()]);
       } catch (e) {
         setError(e.message);
       } finally {
         setLoading(false);
       }
     })();
-  }, [loadSites, loadLog, loadRecipients]);
+  }, [loadSites, loadLog, loadRecipients, loadSocial]);
 
   useEffect(() => {
     const id = setInterval(loadLog, 10000);
@@ -1110,6 +1206,9 @@ export default function BannerMonitorDashboard() {
         })}
       </section>
 
+      {/* ---- social share of voice ---- */}
+      <SocialSection social={social} visible={visible} />
+
       {/* ---- activity + recipients ---- */}
       <section style={S.twoCol}>
         <div style={S.panel}>
@@ -1414,6 +1513,29 @@ const styles = {
 
   link: { color: '#2563eb', textDecoration: 'none', fontWeight: 600, fontSize: 13 },
   cardFooter: { display: 'flex', gap: 16, borderTop: '1px solid #f1f5f9', paddingTop: 10, marginTop: 'auto' },
+
+  // Social share-of-voice rows
+  socialSummary: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 18,
+    flexWrap: 'wrap',
+    fontSize: 12.5,
+    color: '#475569',
+    paddingBottom: 10,
+    borderBottom: '1px solid #f1f5f9',
+    marginBottom: 6,
+  },
+  socialRow: { display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', borderBottom: '1px solid #f8fafc' },
+  socialSite: { width: 150, flexShrink: 0 },
+  socialName: { fontWeight: 700, fontSize: 13 },
+  socialPlatforms: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 },
+  socialBarWrap: { flex: 1, minWidth: 0 },
+  socialBar: { display: 'flex', height: 10, borderRadius: 999, background: '#f1f5f9', overflow: 'hidden' },
+  socialSeg: { height: '100%' },
+  socialCaption: { fontSize: 11, color: '#64748b', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  socialNums: { textAlign: 'right', width: 56, flexShrink: 0 },
+  socialTotal: { fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1 },
 
   twoCol: { display: 'grid', gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)', gap: 16 },
   panel: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 20, boxShadow: '0 1px 3px rgba(15,23,42,.05)' },
