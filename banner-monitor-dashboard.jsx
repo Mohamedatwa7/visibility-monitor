@@ -833,7 +833,7 @@ function CompanyVoiceRow({ rank, s, selected, onSelect }) {
           }
         >
           {lead > 0 ? '+' : ''}
-          {lead} pt
+          {lead}%
         </div>
         <div style={S.countLabel}>{topRival ? `vs ${brandMeta(topRival[0]).label}` : 'no rivals'}</div>
       </div>
