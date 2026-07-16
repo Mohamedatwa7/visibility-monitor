@@ -674,21 +674,21 @@ function TermChips({ searchShare }) {
   );
 }
 
-/* ---------- social share of voice ---------- */
+/* ---------- social media tab ---------- */
 
 const PLATFORM_LABELS = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
 
 const SOCIAL_PERIODS = [
-  ['all', 'Since Jan'],
-  ['90', '90 days'],
-  ['30', '30 days'],
-  ['7', '7 days'],
+  ['all', 'Since Jan 2026'],
+  ['90', 'Last 90 days'],
+  ['30', 'Last 30 days'],
+  ['7', 'Last 7 days'],
 ];
-const SOCIAL_PLATFORMS = [['all', 'All'], ...Object.entries(PLATFORM_LABELS)];
+const SOCIAL_PLATFORMS = [['all', 'All platforms'], ...Object.entries(PLATFORM_LABELS)];
 const SOCIAL_CONTENT = [
   ['all', 'All posts'],
-  ['samsung', 'Samsung'],
-  ['competitor', 'Competitors'],
+  ['samsung', 'Samsung posts'],
+  ['competitor', 'Competitor posts'],
   ['s26', 'Galaxy S26'],
 ];
 
@@ -698,9 +698,67 @@ function fmtCount(n) {
   return n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n);
 }
 
-// One row per company: how much of its (filtered) social posting features
-// Samsung vs competitor brands. Click to focus the post feed on that company.
-function SocialRow({ s, selected, onSelect }) {
+// Month-by-month stacked columns: each bar is that month's posting volume,
+// split into Samsung / competitor / everything else, with Samsung's share of
+// voice printed on top — this is where campaign pushes become visible.
+function MonthlyChart({ posts }) {
+  const S = styles;
+  const months = {};
+  for (const p of posts) {
+    const key = String(p.at).slice(0, 7);
+    const m = (months[key] = months[key] || { total: 0, samsung: 0, competitor: 0 });
+    m.total++;
+    if (p.samsung) m.samsung++;
+    else if ((p.brands || []).some((b) => b !== 'samsung')) m.competitor++;
+  }
+  const keys = Object.keys(months).sort();
+  if (keys.length < 2) return null;
+  const max = Math.max(...keys.map((k) => months[k].total));
+  const H = 110;
+  const px = (n) => Math.round((n / max) * H);
+
+  return (
+    <div>
+      <div style={S.chartTitleRow}>
+        <span style={S.chartTitle}>Month by month — how much of the posting features Samsung</span>
+      </div>
+      <div style={S.monthRow}>
+        {keys.map((k) => {
+          const m = months[k];
+          const other = m.total - m.samsung - m.competitor;
+          const sov = m.total ? Math.round((m.samsung / m.total) * 100) : 0;
+          const label = new Date(`${k}-01T00:00:00Z`).toLocaleString(undefined, { month: 'short' });
+          return (
+            <div
+              key={k}
+              style={S.monthCol}
+              title={`${label}: ${m.total} posts — ${m.samsung} Samsung, ${m.competitor} competitor-only, ${other} other`}
+            >
+              <div style={S.monthPct}>{sov}%</div>
+              <div style={{ ...S.monthBar, height: Math.max(px(m.total), 3) }}>
+                <div style={{ background: '#e2e8f0', height: px(other) }} />
+                <div style={{ background: '#e11d48', height: px(m.competitor) }} />
+                <div style={{ background: '#1428a0', height: px(m.samsung) }} />
+              </div>
+              <div style={S.monthLabel}>{label}</div>
+              <div style={S.monthTotal}>{m.total}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ ...S.legendRow, flexWrap: 'wrap' }}>
+        <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#1428a0' }} /> Samsung posts</span>
+        <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#e11d48' }} /> competitor posts</span>
+        <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#e2e8f0' }} /> everything else (offers, lifestyle…)</span>
+        <span style={{ ...S.legendItem, marginLeft: 'auto' }}>% = Samsung's share of that month's posts</span>
+      </div>
+    </div>
+  );
+}
+
+// One company in the share-of-voice ranking: its posting volume and how much
+// of it features Samsung. Click to focus the post feed on that company.
+function CompanyVoiceRow({ rank, s, selected, onSelect }) {
   const S = styles;
   const pct = (n) => (s.total ? Math.round((n / s.total) * 1000) / 10 : 0);
   const samsungPct = pct(s.samsung);
@@ -720,18 +778,19 @@ function SocialRow({ s, selected, onSelect }) {
       onClick={onSelect}
       title={selected ? 'Feed is focused on this company — click to show all' : 'Click to focus the post feed on this company'}
     >
+      <span style={S.lbRank}>{rank}</span>
       <div style={S.socialSite}>
         <div style={S.socialName}>{s.name}</div>
-        <div style={S.socialPlatforms}>{platforms || 'no posts captured yet'}</div>
+        <div style={S.socialPlatforms}>{platforms || 'no posts in this selection'}</div>
       </div>
       <div style={S.socialBarWrap}>
-        <div style={S.socialBar} title={`Samsung ${samsungPct}% · competitors ${rivalPct}% · other ${Math.max(0, Math.round((100 - samsungPct - rivalPct) * 10) / 10)}%`}>
+        <div style={S.socialBar} title={`Samsung ${samsungPct}% · competitors ${rivalPct}% · everything else ${Math.max(0, Math.round((100 - samsungPct - rivalPct) * 10) / 10)}%`}>
           <div style={{ ...S.socialSeg, width: `${samsungPct}%`, background: '#1428a0' }} />
           <div style={{ ...S.socialSeg, width: `${rivalPct}%`, background: '#e11d48' }} />
         </div>
         <div style={S.socialCaption}>
-          Samsung <strong>{s.samsung}</strong> ({samsungPct}%) · competitors <strong>{s.competitor}</strong> ({rivalPct}%)
-          {topRivals.length > 0 && <span style={{ color: '#94a3b8' }}> — {topRivals.map(([b, n]) => `${brandMeta(b).label} ${n}`).join(', ')}</span>}
+          Samsung in <strong>{samsungPct}%</strong> of its posts · competitors in <strong>{rivalPct}%</strong>
+          {topRivals.length > 0 && <span style={{ color: '#94a3b8' }}> — loudest: {topRivals.map(([b, n]) => `${brandMeta(b).label} ${n}`).join(', ')}</span>}
         </div>
       </div>
       <span style={S.chipInfo} title="Posts mentioning the Galaxy S26 series">
@@ -780,9 +839,11 @@ function SocialPost({ p, siteName }) {
 
 const FEED_PAGE = 8;
 
-// The API returns the raw classified post list; every aggregate here is
-// recomputed locally so the period/platform/content filters are instant.
-function SocialSection({ social, visible }) {
+// The full social-media view. The API returns the raw classified post list;
+// every number here is recomputed locally, so the filters are instant. The
+// period/platform filters drive everything; the content filter only narrows
+// the post feed (so the share-of-voice numbers always stay meaningful).
+function SocialTab({ social, visible }) {
   const S = styles;
   const [period, setPeriod] = useState('all');
   const [platform, setPlatform] = useState('all');
@@ -803,15 +864,25 @@ function SocialSection({ social, visible }) {
       (p) =>
         visibleIds.has(p.site) &&
         (!cutoff || p.at >= cutoff) &&
-        (platform === 'all' || p.platform === platform) &&
-        (content === 'all' ||
-          (content === 'samsung' && p.samsung) ||
-          (content === 'competitor' && !p.samsung && (p.brands || []).some((b) => b !== 'samsung')) ||
-          (content === 's26' && p.s26))
+        (platform === 'all' || p.platform === platform)
     );
-  }, [posts, visibleIds, period, platform, content]);
+  }, [posts, visibleIds, period, platform]);
 
-  // Per-company aggregates over the filtered posts, in site-card order.
+  // Headline numbers over the filtered posts.
+  const kpis = useMemo(() => {
+    let samsung = 0;
+    let s26 = 0;
+    const rivalMentions = {};
+    for (const p of filtered) {
+      if (p.samsung) samsung++;
+      if (p.s26) s26++;
+      for (const b of p.brands || []) if (b !== 'samsung') rivalMentions[b] = (rivalMentions[b] || 0) + 1;
+    }
+    const topRival = Object.entries(rivalMentions).sort((a, b) => b[1] - a[1])[0] || null;
+    return { total: filtered.length, samsung, s26, topRival };
+  }, [filtered]);
+
+  // Per-company aggregates, ranked by Samsung's share of their posts.
   const rows = useMemo(() => {
     const bySite = {};
     for (const p of filtered) {
@@ -830,99 +901,156 @@ function SocialSection({ social, visible }) {
       for (const b of p.brands || []) a.brands[b] = (a.brands[b] || 0) + 1;
       a.byPlatform[p.platform] = (a.byPlatform[p.platform] || 0) + 1;
     }
-    return visible.filter((v) => bySite[v.id]).map((v) => ({ id: v.id, name: v.name, ...bySite[v.id] }));
+    return visible
+      .filter((v) => bySite[v.id])
+      .map((v) => ({ id: v.id, name: v.name, ...bySite[v.id] }))
+      .sort((a, b) => b.samsung / b.total - a.samsung / a.total || b.total - a.total);
   }, [filtered, visible]);
 
   const feed = useMemo(
-    () => (feedSite ? filtered.filter((p) => p.site === feedSite) : filtered),
-    [filtered, feedSite]
+    () =>
+      filtered.filter(
+        (p) =>
+          (!feedSite || p.site === feedSite) &&
+          (content === 'all' ||
+            (content === 'samsung' && p.samsung) ||
+            (content === 'competitor' && !p.samsung && (p.brands || []).some((b) => b !== 'samsung')) ||
+            (content === 's26' && p.s26))
+      ),
+    [filtered, feedSite, content]
   );
 
-  if (!posts.length) return null;
+  if (!posts.length) {
+    return (
+      <div style={{ ...S.panel, marginBottom: 24 }}>
+        <div style={S.noTrend}>No social posts collected yet — this view fills up after the first daily social sync.</div>
+      </div>
+    );
+  }
 
-  const total = filtered.length;
-  const samsung = rows.reduce((n, r) => n + r.samsung, 0);
-  const s26 = rows.reduce((n, r) => n + r.s26, 0);
-  const sinceLabel = new Date(social.since).toLocaleString(undefined, { month: 'short', year: 'numeric' });
-  const setFilter = (set) => (v) => {
-    set(v);
-    setFeedLimit(FEED_PAGE);
-  };
+  const sov = kpis.total ? Math.round((kpis.samsung / kpis.total) * 1000) / 10 : 0;
+  const oneIn = kpis.samsung ? Math.round(kpis.total / kpis.samsung) : null;
+  const sinceLabel = new Date(social.since).toLocaleString(undefined, { month: 'long', year: 'numeric' });
   const chips = (opts, val, set) =>
     opts.map(([v, label]) => (
       <button
         key={v}
         style={{ ...S.filterChip, ...(val === v ? S.filterChipOn : {}) }}
-        onClick={() => setFilter(set)(v)}
+        onClick={() => {
+          set(v);
+          setFeedLimit(FEED_PAGE);
+        }}
       >
         {label}
       </button>
     ));
 
   return (
-    <section style={{ marginBottom: 24 }}>
-      <div style={S.sectionHead}>
-        <h2 style={{ ...S.h2, margin: 0 }}>Social media — share of voice</h2>
-        <span style={S.sectionSub}>
-          Instagram, TikTok & Facebook posts by each company since {sinceLabel} — Samsung vs competitor brands
-        </span>
+    <>
+      {/* plain-language explainer */}
+      <div style={S.explainer}>
+        <strong>How to read this:</strong> every public Instagram, TikTok and Facebook post published by these
+        companies since {sinceLabel} is collected daily, and each caption is scanned for brand mentions. A post
+        counts for <strong style={{ color: '#1428a0' }}>Samsung</strong> when it mentions Samsung or a Galaxy device,
+        and for <strong style={{ color: '#e11d48' }}>competitors</strong> when it mentions a rival brand (Apple,
+        Xiaomi, Honor…) without Samsung. <strong>Share of voice</strong> is the percentage of a company's posts that
+        feature Samsung — the higher it is, the more of that partner's marketing attention goes to Samsung.
       </div>
-      <div style={S.panel}>
-        <div style={S.socialFilters}>
+
+      {/* social filters */}
+      <section style={S.filterBar}>
+        <div style={S.filterGroup}>
           <span style={S.filterLabel}>Period</span>
           {chips(SOCIAL_PERIODS, period, setPeriod)}
-          <span style={{ ...S.filterLabel, marginLeft: 8 }}>Platform</span>
+        </div>
+        <div style={S.filterGroup}>
+          <span style={S.filterLabel}>Platform</span>
           {chips(SOCIAL_PLATFORMS, platform, setPlatform)}
-          <span style={{ ...S.filterLabel, marginLeft: 8 }}>Content</span>
-          {chips(SOCIAL_CONTENT, content, setContent)}
         </div>
-        <div style={S.socialSummary}>
-          <span><strong>{total}</strong> posts match</span>
-          <span>
-            <i style={{ ...S.legendDot, background: '#1428a0' }} /> Samsung <strong>{samsung}</strong> ({total ? Math.round((samsung / total) * 1000) / 10 : 0}%)
-          </span>
-          <span>
-            <i style={{ ...S.legendDot, background: '#e11d48' }} /> competitor brands
-          </span>
-          <span style={S.chipInfo}>Galaxy S26 posts · {s26}</span>
+        <span style={S.filterCount}>{kpis.total} posts in this selection</span>
+      </section>
+
+      {/* headline numbers */}
+      <section style={S.kpiRow}>
+        <div style={S.kpi}>
+          <div style={S.kpiLabel}>Posts analysed</div>
+          <div style={S.kpiValue}>{kpis.total}</div>
+          <div style={S.kpiSub}>published by {rows.length} companies on Instagram, TikTok & Facebook</div>
         </div>
-        {total === 0 && <div style={S.noTrend}>No posts match these filters.</div>}
-        {total > 0 && (
-          <div style={S.socialCols}>
-            <div>
-              {rows.map((s) => (
-                <SocialRow
-                  key={s.id}
-                  s={s}
-                  selected={feedSite === s.id}
-                  onSelect={() => setFeedSite(feedSite === s.id ? null : s.id)}
-                />
-              ))}
-              <div style={S.socialHint}>Click a company to focus the post feed.</div>
+        <div style={S.kpi}>
+          <div style={S.kpiLabel}>Samsung share of voice</div>
+          <div style={{ ...S.kpiValue, color: '#1428a0' }}>{sov}%</div>
+          <div style={S.kpiSub}>
+            {kpis.samsung} of {kpis.total} posts feature Samsung{oneIn > 1 ? ` — about 1 in every ${oneIn} posts` : ''}
+          </div>
+        </div>
+        <div style={S.kpi}>
+          <div style={S.kpiLabel}>Galaxy S26 posts</div>
+          <div style={S.kpiValue}>{kpis.s26}</div>
+          <div style={S.kpiSub}>posts specifically about the Galaxy S26 series, Samsung's newest flagship</div>
+        </div>
+        <div style={S.kpi}>
+          <div style={S.kpiLabel}>Loudest competitor</div>
+          <div style={S.kpiValue}>{kpis.topRival ? brandMeta(kpis.topRival[0]).label : '—'}</div>
+          <div style={S.kpiSub}>
+            {kpis.topRival
+              ? `mentioned in ${kpis.topRival[1]} posts — Samsung's biggest rival for feed space`
+              : 'no competitor brand mentions in this selection'}
+          </div>
+        </div>
+      </section>
+
+      {/* month-by-month trend */}
+      <div style={{ ...S.panel, marginBottom: 16 }}>
+        <MonthlyChart posts={filtered} />
+      </div>
+
+      {/* company ranking + the actual posts */}
+      <div style={{ ...S.panel, marginBottom: 24 }}>
+        <div style={S.socialCols}>
+          <div>
+            <div style={S.feedHead}>
+              Who gives Samsung the most voice
+              <span style={{ fontWeight: 500, color: '#94a3b8' }}>ranked by Samsung's share of their posts</span>
             </div>
-            <div>
-              <div style={S.feedHead}>
-                Latest posts{feedSite ? ` — ${nameOf[feedSite] || feedSite}` : ''}
-                <span style={{ fontWeight: 500, color: '#94a3b8' }}>({feed.length})</span>
-                {feedSite && (
-                  <button style={S.feedClear} onClick={() => setFeedSite(null)}>
-                    show all ✕
-                  </button>
-                )}
-              </div>
-              {feed.slice(0, feedLimit).map((p) => (
-                <SocialPost key={`${p.platform}:${p.id}`} p={p} siteName={nameOf[p.site] || p.site} />
-              ))}
-              {feed.length > feedLimit && (
-                <button style={S.feedMore} onClick={() => setFeedLimit(feedLimit + 20)}>
-                  Show more ({feed.length - feedLimit} remaining)
+            {rows.map((s, i) => (
+              <CompanyVoiceRow
+                key={s.id}
+                rank={i + 1}
+                s={s}
+                selected={feedSite === s.id}
+                onSelect={() => {
+                  setFeedSite(feedSite === s.id ? null : s.id);
+                  setFeedLimit(FEED_PAGE);
+                }}
+              />
+            ))}
+            <div style={S.socialHint}>Click a company to see only its posts in the feed.</div>
+          </div>
+          <div>
+            <div style={S.feedHead}>
+              The actual posts{feedSite ? ` — ${nameOf[feedSite] || feedSite}` : ''}
+              <span style={{ fontWeight: 500, color: '#94a3b8' }}>({feed.length})</span>
+              {feedSite && (
+                <button style={S.feedClear} onClick={() => setFeedSite(null)}>
+                  show all ✕
                 </button>
               )}
             </div>
+            <div style={{ ...S.filterGroup, margin: '2px 0 6px' }}>{chips(SOCIAL_CONTENT, content, setContent)}</div>
+            {feed.slice(0, feedLimit).map((p) => (
+              <SocialPost key={`${p.platform}:${p.id}`} p={p} siteName={nameOf[p.site] || p.site} />
+            ))}
+            {feed.length === 0 && <div style={S.noTrend}>No posts match this selection.</div>}
+            {feed.length > feedLimit && (
+              <button style={S.feedMore} onClick={() => setFeedLimit(feedLimit + 20)}>
+                Show more ({feed.length - feedLimit} remaining)
+              </button>
+            )}
           </div>
-        )}
+        </div>
       </div>
-    </section>
+    </>
   );
 }
 
@@ -938,6 +1066,7 @@ export default function BannerMonitorDashboard() {
   const [error, setError] = useState(null);
   const [savedNote, setSavedNote] = useState('');
   const [assetsSite, setAssetsSite] = useState(null);
+  const [tab, setTab] = useState('sites'); // 'sites' | 'social'
   const [countryFilter, setCountryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   // Which site cards are flipped to their competition-analysis back face.
@@ -1120,6 +1249,32 @@ export default function BannerMonitorDashboard() {
 
       {error && <div style={S.error}>{error}</div>}
 
+      {/* ---- view switch: websites vs social media ---- */}
+      <section style={S.tabRow}>
+        <button style={{ ...S.tabBox, ...(tab === 'sites' ? S.tabBoxOn : {}) }} onClick={() => setTab('sites')}>
+          <div style={S.tabTitle}>
+            🛒 Websites
+            <span style={S.tabCount}>{sites.length} sites</span>
+          </div>
+          <div style={S.tabSub}>
+            How visible Samsung is on the partner sites themselves — hero banners, promo cards, catalog shelf and
+            search results.
+          </div>
+        </button>
+        <button style={{ ...S.tabBox, ...(tab === 'social' ? S.tabBoxOn : {}) }} onClick={() => setTab('social')}>
+          <div style={S.tabTitle}>
+            📣 Social media
+            <span style={S.tabCount}>
+              {social && Array.isArray(social.posts) ? `${social.posts.length} posts` : 'loading…'}
+            </span>
+          </div>
+          <div style={S.tabSub}>
+            How often each company posts about Samsung on Instagram, TikTok & Facebook — Samsung's share of voice in
+            their feeds.
+          </div>
+        </button>
+      </section>
+
       {/* ---- filters ---- */}
       <section style={S.filterBar}>
         <div style={S.filterGroup}>
@@ -1155,6 +1310,10 @@ export default function BannerMonitorDashboard() {
         </span>
       </section>
 
+      {tab === 'social' && <SocialTab social={social} visible={visible} />}
+
+      {tab === 'sites' && (
+        <>
       {/* ---- KPI strip: Samsung's aggregate shares across the filtered sites ---- */}
       <section style={S.kpiRow}>
         <div style={S.kpi}>
@@ -1371,9 +1530,6 @@ export default function BannerMonitorDashboard() {
         })}
       </section>
 
-      {/* ---- social share of voice ---- */}
-      <SocialSection social={social} visible={visible} />
-
       {/* ---- activity + recipients ---- */}
       <section style={S.twoCol}>
         <div style={S.panel}>
@@ -1430,6 +1586,8 @@ export default function BannerMonitorDashboard() {
           </div>
         </div>
       </section>
+        </>
+      )}
 
       <footer style={S.footer}>
         Automated by banner-monitor · counts are selector-based and tuned per site · WoW/MoM deltas
@@ -1499,6 +1657,43 @@ const styles = {
     borderRadius: 10,
     padding: '10px 14px',
     marginBottom: 16,
+  },
+
+  // Websites / Social media view switch
+  tabRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 14, marginBottom: 14 },
+  tabBox: {
+    textAlign: 'left',
+    fontFamily: 'inherit',
+    background: '#fff',
+    border: '1px solid #e2e8f0',
+    borderRadius: 14,
+    padding: '14px 18px',
+    cursor: 'pointer',
+    boxShadow: '0 1px 3px rgba(15,23,42,.05)',
+  },
+  tabBoxOn: { borderColor: '#1428a0', background: '#f7f9ff', boxShadow: '0 0 0 2px rgba(20,40,160,.14)' },
+  tabTitle: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 800, color: '#0f172a' },
+  tabSub: { fontSize: 12, color: '#64748b', marginTop: 5, lineHeight: 1.55 },
+  tabCount: {
+    marginLeft: 'auto',
+    background: '#eff6ff',
+    color: '#1d4ed8',
+    border: '1px solid #dbeafe',
+    borderRadius: 999,
+    padding: '2px 9px',
+    fontSize: 11,
+    fontWeight: 600,
+  },
+
+  explainer: {
+    background: '#f7f9ff',
+    border: '1px solid #dbeafe',
+    borderRadius: 12,
+    padding: '12px 16px',
+    fontSize: 12.5,
+    color: '#334155',
+    lineHeight: 1.7,
+    marginBottom: 14,
   },
 
   filterBar: {
@@ -1680,26 +1875,6 @@ const styles = {
   cardFooter: { display: 'flex', gap: 16, borderTop: '1px solid #f1f5f9', paddingTop: 10, marginTop: 'auto' },
 
   // Social share-of-voice rows
-  socialSummary: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 18,
-    flexWrap: 'wrap',
-    fontSize: 12.5,
-    color: '#475569',
-    paddingBottom: 10,
-    borderBottom: '1px solid #f1f5f9',
-    marginBottom: 6,
-  },
-  socialFilters: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    flexWrap: 'wrap',
-    paddingBottom: 10,
-    marginBottom: 10,
-    borderBottom: '1px solid #f1f5f9',
-  },
   socialCols: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(380px,1fr))', gap: 24, alignItems: 'start' },
   socialRow: { display: 'flex', alignItems: 'center', gap: 14, padding: '9px 6px', borderBottom: '1px solid #f8fafc', borderRadius: 8, cursor: 'pointer' },
   socialSite: { width: 150, flexShrink: 0 },
@@ -1713,6 +1888,22 @@ const styles = {
   socialTotal: { fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1 },
   socialRowSelected: { background: '#eef4ff' },
   socialHint: { fontSize: 10.5, color: '#cbd5e1', marginTop: 8 },
+
+  // Month-by-month posting chart
+  monthRow: { display: 'flex', alignItems: 'flex-end', gap: 10, padding: '10px 2px 2px', overflowX: 'auto' },
+  monthCol: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: 1, minWidth: 34 },
+  monthBar: {
+    width: '100%',
+    maxWidth: 48,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'flex-end',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  monthPct: { fontSize: 11, fontWeight: 800, color: '#1428a0' },
+  monthLabel: { fontSize: 11, fontWeight: 700, color: '#334155' },
+  monthTotal: { fontSize: 10, color: '#94a3b8' },
 
   // Social post feed
   feedHead: { display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, fontWeight: 700, color: '#334155', margin: '1px 0 4px' },
