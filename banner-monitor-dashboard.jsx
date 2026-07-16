@@ -772,6 +772,9 @@ function PostingChart({ posts, bucket, title }) {
 function CompanyVoiceRow({ rank, s, selected, onSelect }) {
   const S = styles;
   const samsungPct = s.total ? Math.round((s.samsung / s.total) * 1000) / 10 : 0;
+  const rivals = Object.entries(s.rivalBrands || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4);
   const platforms = ['instagram', 'tiktok', 'facebook']
     .map((pf) => (s.samsungByPf[pf] ? `${PLATFORM_LABELS[pf]} ${s.samsungByPf[pf]}` : null))
     .filter(Boolean)
@@ -795,6 +798,17 @@ function CompanyVoiceRow({ rank, s, selected, onSelect }) {
         <div style={S.socialCaption}>
           <strong>{s.samsung}</strong> of its {s.total} posts feature Samsung (<strong>{samsungPct}%</strong>)
         </div>
+        {rivals.length > 0 && (
+          <div style={S.socialRivals}>
+            <span style={{ color: '#94a3b8' }}>Competitors:</span>
+            {rivals.map(([b, n]) => (
+              <span key={b} style={S.postBrand}>
+                <i style={{ ...S.legendDot, background: brandMeta(b).color }} /> {brandMeta(b).label}{' '}
+                {Math.round((n / s.total) * 1000) / 10}%
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <span style={S.chipInfo} title="Posts mentioning the Galaxy S26 series">
         S26 · {s.s26}
@@ -898,13 +912,14 @@ function SocialTab({ social, visible }) {
   const rows = useMemo(() => {
     const bySite = {};
     for (const p of filtered) {
-      const a = (bySite[p.site] = bySite[p.site] || { total: 0, samsung: 0, s26: 0, samsungByPf: {} });
+      const a = (bySite[p.site] = bySite[p.site] || { total: 0, samsung: 0, s26: 0, samsungByPf: {}, rivalBrands: {} });
       a.total++;
       if (p.samsung) {
         a.samsung++;
         a.samsungByPf[p.platform] = (a.samsungByPf[p.platform] || 0) + 1;
       }
       if (p.s26) a.s26++;
+      for (const b of p.brands || []) if (b !== 'samsung') a.rivalBrands[b] = (a.rivalBrands[b] || 0) + 1;
     }
     return visible
       .filter((v) => bySite[v.id])
@@ -940,7 +955,6 @@ function SocialTab({ social, visible }) {
 
   const sov = kpis.total ? Math.round((kpis.samsung / kpis.total) * 1000) / 10 : 0;
   const oneIn = kpis.samsung ? Math.round(kpis.total / kpis.samsung) : null;
-  const sinceLabel = new Date(social.since).toLocaleString(undefined, { month: 'long', year: 'numeric' });
   const chips = (opts, val, set) =>
     opts.map(([v, label]) => (
       <button
@@ -957,16 +971,6 @@ function SocialTab({ social, visible }) {
 
   return (
     <>
-      {/* plain-language explainer */}
-      <div style={S.explainer}>
-        <strong>How to read this:</strong> every public Instagram, TikTok and Facebook post published by these
-        companies since {sinceLabel} is collected daily, and each caption is scanned for brand mentions. A post
-        counts for <strong style={{ color: '#1428a0' }}>Samsung</strong> when it mentions Samsung or a Galaxy device,
-        and for <strong style={{ color: '#e11d48' }}>competitors</strong> when it mentions a rival brand (Apple,
-        Xiaomi, Honor…) without Samsung. <strong>Share of voice</strong> is the percentage of a company's posts that
-        feature Samsung — the higher it is, the more of that partner's marketing attention goes to Samsung.
-      </div>
-
       {/* social filters */}
       <section style={S.filterBar}>
         <div style={S.filterGroup}>
@@ -1344,7 +1348,7 @@ export default function BannerMonitorDashboard() {
       <section style={S.tabRow}>
         <button style={{ ...S.tabBox, ...(tab === 'sites' ? S.tabBoxOn : {}) }} onClick={() => setTab('sites')}>
           <div style={S.tabTitle}>
-            🛒 Websites
+            Websites
             <span style={S.tabCount}>{sites.length} sites</span>
           </div>
           <div style={S.tabSub}>
@@ -1354,7 +1358,7 @@ export default function BannerMonitorDashboard() {
         </button>
         <button style={{ ...S.tabBox, ...(tab === 'social' ? S.tabBoxOn : {}) }} onClick={() => setTab('social')}>
           <div style={S.tabTitle}>
-            📣 Social media
+            Social media
             <span style={S.tabCount}>
               {social && Array.isArray(social.posts) ? `${social.posts.length} posts` : 'loading…'}
             </span>
@@ -1776,17 +1780,6 @@ const styles = {
     fontWeight: 600,
   },
 
-  explainer: {
-    background: '#f7f9ff',
-    border: '1px solid #dbeafe',
-    borderRadius: 12,
-    padding: '12px 16px',
-    fontSize: 12.5,
-    color: '#334155',
-    lineHeight: 1.7,
-    marginBottom: 14,
-  },
-
   filterBar: {
     display: 'flex',
     alignItems: 'center',
@@ -1998,6 +1991,8 @@ const styles = {
   socialNums: { textAlign: 'right', width: 56, flexShrink: 0 },
   socialTotal: { fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1 },
   socialRowSelected: { background: '#eef4ff' },
+  // Wraps instead of truncating so every competitor stays readable.
+  socialRivals: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#64748b', marginTop: 3 },
   socialHint: { fontSize: 10.5, color: '#cbd5e1', marginTop: 8 },
 
   // Month-by-month posting chart
