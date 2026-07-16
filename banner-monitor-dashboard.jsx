@@ -488,54 +488,69 @@ function CompetitionTrend({ site, field, title }) {
 }
 
 // Per-site competition panel: brand leaderboards per metric + division lines.
-function CompetitionCard({ site }) {
+// Rendered as the BACK face of each site card — `onFlip` flips back to metrics.
+function CompetitionCard({ site, onFlip }) {
   const S = styles;
-  const c = site.competition;
-  if (!c) return null;
+  const c = site.competition || {};
   const placements = mergeBrandMaps(c.hero, c.promo, c.tiles);
   const divisions = Object.entries(c.divisions || {}).filter(
     ([, brands]) => Object.keys(brands).length >= 2 // head-to-head needs 2+ brands
   );
   const hasAny =
     Object.keys(placements).length || (c.devices && Object.keys(c.devices).length) || (c.search && Object.keys(c.search).length);
-  if (!hasAny) return null;
 
   return (
     <div style={S.card}>
-      <div style={S.siteName}>{site.name}</div>
-
-      {/* Homepage placements, broken down by placement type */}
-      <div style={{ marginTop: 12 }}>
-        <div style={S.divisionHead}>Homepage placements</div>
-        <Leaderboard title="Hero banners" data={c.hero} />
-        <Leaderboard title="Promo cards" data={c.promo} />
-        <Leaderboard title="Product tiles" data={c.tiles} />
-        <CompetitionTrend site={site} field="placementBrands" title="Homepage placements" />
+      <div style={S.cardTop}>
+        <div>
+          <div style={S.siteName}>{site.name}</div>
+          <div style={S.region}>Competition analysis · Samsung vs rival brands</div>
+        </div>
+        <button style={S.flipBtn} onClick={onFlip} title="Back to Samsung metrics">
+          ⇄ Overview
+        </button>
       </div>
 
-      {/* Device catalog */}
-      {c.devices && (
-        <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 10 }}>
-          <div style={S.divisionHead}>Device catalog</div>
-          <Leaderboard title="Share of catalog" subtitle="first 5 pages" data={c.devices} />
-          <CompetitionTrend site={site} field="catalogBrands" title="Device catalog" />
-        </div>
+      {!hasAny && (
+        <div style={S.noTrend}>No competition data captured yet — brand breakdowns appear after the next check.</div>
       )}
 
-      {/* Search */}
-      {c.search && (
-        <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 10 }}>
-          <Leaderboard title="Search results" subtitle="common phone searches" data={c.search} />
-        </div>
-      )}
+      {hasAny && (
+        <>
+          {/* Homepage placements, broken down by placement type */}
+          <div style={{ marginTop: 2 }}>
+            <div style={S.divisionHead}>Homepage placements</div>
+            <Leaderboard title="Hero banners" data={c.hero} />
+            <Leaderboard title="Promo cards" data={c.promo} />
+            <Leaderboard title="Product tiles" data={c.tiles} />
+            <CompetitionTrend site={site} field="placementBrands" title="Homepage placements" />
+          </div>
 
-      {divisions.length > 0 && (
-        <div style={{ marginTop: 4 }}>
-          <div style={S.divisionHead}>Samsung's position by division</div>
-          {divisions.map(([div, brands]) => (
-            <DivisionLine key={div} label={DIVISION_LABELS[div] || div} brands={brands} />
-          ))}
-        </div>
+          {/* Device catalog */}
+          {c.devices && (
+            <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 10 }}>
+              <div style={S.divisionHead}>Device catalog</div>
+              <Leaderboard title="Share of catalog" subtitle="first 5 pages" data={c.devices} />
+              <CompetitionTrend site={site} field="catalogBrands" title="Device catalog" />
+            </div>
+          )}
+
+          {/* Search */}
+          {c.search && (
+            <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 10 }}>
+              <Leaderboard title="Search results" subtitle="common phone searches" data={c.search} />
+            </div>
+          )}
+
+          {divisions.length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              <div style={S.divisionHead}>Samsung's position by division</div>
+              {divisions.map(([div, brands]) => (
+                <DivisionLine key={div} label={DIVISION_LABELS[div] || div} brands={brands} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -673,6 +688,9 @@ export default function BannerMonitorDashboard() {
   const [assetsSite, setAssetsSite] = useState(null);
   const [countryFilter, setCountryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  // Which site cards are flipped to their competition-analysis back face.
+  const [flipped, setFlipped] = useState({});
+  const toggleFlip = useCallback((id) => setFlipped((f) => ({ ...f, [id]: !f[id] })), []);
 
   const loadSites = useCallback(async () => {
     const { sites } = await api('/api/sites');
@@ -917,8 +935,14 @@ export default function BannerMonitorDashboard() {
           const promoMoM = valueAgo(s.history, 'promoCount', 30);
           const promoPct =
             s.promoTotal && s.promoCount != null ? Math.round((s.promoCount / s.promoTotal) * 1000) / 10 : null;
+          const isFlipped = !!flipped[s.id];
           return (
-            <div key={s.id} style={S.card}>
+            // Flip container: front = Samsung metrics, back = competition
+            // analysis. The visible face sits in normal flow and sets the
+            // height; the hidden face is absolutely positioned and clipped.
+            <div key={s.id} style={S.flipOuter}>
+              <div style={{ ...S.flipInner, transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+              <div style={{ ...S.card, ...S.flipFace, ...(isFlipped ? S.flipFaceHidden : {}) }}>
               <div style={S.cardTop}>
                 <div>
                   <div style={S.siteName}>{s.name}</div>
@@ -1054,28 +1078,24 @@ export default function BannerMonitorDashboard() {
                     Assets ↗
                   </a>
                 )}
+                <button
+                  style={{ ...S.flipBtn, marginLeft: 'auto' }}
+                  onClick={() => toggleFlip(s.id)}
+                  title="Flip to Samsung vs competitor brand breakdowns"
+                >
+                  ⇄ Competition
+                </button>
+              </div>
+              </div>
+
+              <div style={{ ...S.flipFace, ...S.flipFaceBack, ...(isFlipped ? {} : S.flipFaceHidden) }}>
+                <CompetitionCard site={s} onFlip={() => toggleFlip(s.id)} />
+              </div>
               </div>
             </div>
           );
         })}
       </section>
-
-      {/* ---- competition analysis ---- */}
-      {visible.some((s) => s.competition) && (
-        <section style={{ marginBottom: 24 }}>
-          <div style={S.sectionHead}>
-            <h2 style={{ ...S.h2, margin: 0 }}>Competition analysis</h2>
-            <span style={S.sectionSub}>
-              Samsung vs competing brands on each retailer — share of placements, catalog, and search
-            </span>
-          </div>
-          <div style={S.grid}>
-            {visible.map((s) => (
-              <CompetitionCard key={s.id} site={s} />
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* ---- activity + recipients ---- */}
       <section style={S.twoCol}>
@@ -1248,6 +1268,36 @@ const styles = {
   kpiSub: { color: '#94a3b8', fontSize: 11, lineHeight: 1.5 },
 
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(330px,1fr))', gap: 16, marginBottom: 24 },
+
+  // Card flip (front = metrics, back = competition analysis). The hidden face
+  // is absolutely positioned so the visible one drives the card's height.
+  flipOuter: { perspective: 1400 },
+  flipInner: {
+    position: 'relative',
+    transformStyle: 'preserve-3d',
+    transition: 'transform .55s cubic-bezier(.4,.1,.2,1)',
+    height: '100%',
+  },
+  flipFace: {
+    backfaceVisibility: 'hidden',
+    WebkitBackfaceVisibility: 'hidden',
+    boxSizing: 'border-box',
+  },
+  flipFaceBack: { transform: 'rotateY(180deg)' },
+  flipFaceHidden: { position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' },
+  flipBtn: {
+    background: '#f8fafc',
+    color: '#1e3a8a',
+    border: '1px solid #dbeafe',
+    borderRadius: 999,
+    padding: '4px 12px',
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
+
   card: {
     background: '#fff',
     border: '1px solid #e2e8f0',
