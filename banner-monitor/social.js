@@ -43,6 +43,13 @@ const S26_RE = /galaxy\s*s\s?26|(?<![\w.])s\s?26(?:\s*(?:ultra|plus|\+|edge))?(?
 
 /* ---------------- classification ---------------- */
 
+// Caption snippet stored with each post (dashboard post feed). Long enough to
+// read, short enough that a full-history site blob stays a manageable row.
+function trimCaption(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  return t.length > 200 ? t.slice(0, 199) + '…' : t;
+}
+
 function classifyCaption(text) {
   const t = String(text || '');
   const brands = [];
@@ -109,6 +116,7 @@ function normalizeInstagram(item) {
       id: String(id),
       url: item.url || (item.shortCode ? `https://www.instagram.com/p/${item.shortCode}/` : null),
       at: new Date(item.timestamp).toISOString(),
+      caption: trimCaption(item.caption),
       likes: item.likesCount || 0,
       comments: item.commentsCount || 0,
       views: item.videoViewCount || 0,
@@ -129,6 +137,7 @@ function normalizeTikTok(item) {
       id: String(item.id),
       url: item.webVideoUrl || `https://www.tiktok.com/@${author}/video/${item.id}`,
       at: new Date(at).toISOString(),
+      caption: trimCaption(item.text),
       likes: item.diggCount || 0,
       comments: item.commentCount || 0,
       views: item.playCount || 0,
@@ -149,6 +158,7 @@ function normalizeFacebook(item) {
       id: String(id),
       url: item.url || item.topLevelUrl || null,
       at: new Date(at).toISOString(),
+      caption: trimCaption(item.text || item.message),
       likes: item.likes || (item.reactions && item.reactions.total) || 0,
       comments: item.comments || 0,
       views: 0,

@@ -678,9 +678,29 @@ function TermChips({ searchShare }) {
 
 const PLATFORM_LABELS = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
 
-// One row per company: how much of its social feed (IG/TikTok/FB posts since
-// Jan 2026) features Samsung vs competitor brands, and Galaxy S26 posts.
-function SocialRow({ s }) {
+const SOCIAL_PERIODS = [
+  ['all', 'Since Jan'],
+  ['90', '90 days'],
+  ['30', '30 days'],
+  ['7', '7 days'],
+];
+const SOCIAL_PLATFORMS = [['all', 'All'], ...Object.entries(PLATFORM_LABELS)];
+const SOCIAL_CONTENT = [
+  ['all', 'All posts'],
+  ['samsung', 'Samsung'],
+  ['competitor', 'Competitors'],
+  ['s26', 'Galaxy S26'],
+];
+
+// Compact engagement numbers for the post feed (1.2k, 34k).
+function fmtCount(n) {
+  if (!n) return '0';
+  return n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n);
+}
+
+// One row per company: how much of its (filtered) social posting features
+// Samsung vs competitor brands. Click to focus the post feed on that company.
+function SocialRow({ s, selected, onSelect }) {
   const S = styles;
   const pct = (n) => (s.total ? Math.round((n / s.total) * 1000) / 10 : 0);
   const samsungPct = pct(s.samsung);
@@ -690,12 +710,16 @@ function SocialRow({ s }) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
   const platforms = ['instagram', 'tiktok', 'facebook']
-    .map((pf) => (s.byPlatform[pf] ? `${PLATFORM_LABELS[pf]} ${s.byPlatform[pf].total}` : null))
+    .map((pf) => (s.byPlatform[pf] ? `${PLATFORM_LABELS[pf]} ${s.byPlatform[pf]}` : null))
     .filter(Boolean)
     .join(' · ');
 
   return (
-    <div style={S.socialRow}>
+    <div
+      style={{ ...S.socialRow, ...(selected ? S.socialRowSelected : {}) }}
+      onClick={onSelect}
+      title={selected ? 'Feed is focused on this company — click to show all' : 'Click to focus the post feed on this company'}
+    >
       <div style={S.socialSite}>
         <div style={S.socialName}>{s.name}</div>
         <div style={S.socialPlatforms}>{platforms || 'no posts captured yet'}</div>
@@ -721,18 +745,119 @@ function SocialRow({ s }) {
   );
 }
 
+// One post in the feed: who/where/when + trimmed caption + engagement.
+function SocialPost({ p, siteName }) {
+  const S = styles;
+  const rivals = (p.brands || []).filter((b) => b !== 'samsung').slice(0, 3);
+  const stats = [`♥ ${fmtCount(p.likes)}`, `💬 ${fmtCount(p.comments)}`];
+  if (p.views) stats.push(`▶ ${fmtCount(p.views)}`);
+  return (
+    <a href={p.url || '#'} target="_blank" rel="noreferrer" style={S.postRow}>
+      <div style={S.postMeta}>
+        <span style={S.postSite}>{siteName}</span>
+        <span>{PLATFORM_LABELS[p.platform] || p.platform}</span>
+        <span>{fmtTime(p.at)}</span>
+        {p.s26 ? (
+          <span style={S.chipInfo}>Galaxy S26</span>
+        ) : (
+          p.samsung && (
+            <span style={S.postBrand}>
+              <i style={{ ...S.legendDot, background: brandMeta('samsung').color }} /> Samsung
+            </span>
+          )
+        )}
+        {rivals.map((b) => (
+          <span key={b} style={S.postBrand}>
+            <i style={{ ...S.legendDot, background: brandMeta(b).color }} /> {brandMeta(b).label}
+          </span>
+        ))}
+        <span style={S.postStats}>{stats.join(' · ')}</span>
+      </div>
+      <div style={S.postCaption}>{p.caption || '(no caption)'}</div>
+    </a>
+  );
+}
+
+const FEED_PAGE = 8;
+
+// The API returns the raw classified post list; every aggregate here is
+// recomputed locally so the period/platform/content filters are instant.
 function SocialSection({ social, visible }) {
   const S = styles;
-  if (!social || !Array.isArray(social.sites)) return null;
-  const byId = Object.fromEntries(social.sites.map((s) => [s.id, s]));
-  // Same order as the site cards (operators first, grouped by country).
-  const rows = visible.map((v) => byId[v.id]).filter((s) => s && s.total > 0);
-  if (!rows.length) return null;
-  const sum = (k) => rows.reduce((n, r) => n + r[k], 0);
-  const total = sum('total');
-  const samsung = sum('samsung');
-  const s26 = sum('s26');
+  const [period, setPeriod] = useState('all');
+  const [platform, setPlatform] = useState('all');
+  const [content, setContent] = useState('all');
+  const [feedSite, setFeedSite] = useState(null);
+  const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
+
+  const posts = social && Array.isArray(social.posts) ? social.posts : [];
+  const nameOf = useMemo(
+    () => Object.fromEntries(((social && social.sites) || []).map((s) => [s.id, s.name])),
+    [social]
+  );
+  const visibleIds = useMemo(() => new Set(visible.map((v) => v.id)), [visible]);
+
+  const filtered = useMemo(() => {
+    const cutoff = period === 'all' ? null : new Date(Date.now() - Number(period) * DAY).toISOString();
+    return posts.filter(
+      (p) =>
+        visibleIds.has(p.site) &&
+        (!cutoff || p.at >= cutoff) &&
+        (platform === 'all' || p.platform === platform) &&
+        (content === 'all' ||
+          (content === 'samsung' && p.samsung) ||
+          (content === 'competitor' && !p.samsung && (p.brands || []).some((b) => b !== 'samsung')) ||
+          (content === 's26' && p.s26))
+    );
+  }, [posts, visibleIds, period, platform, content]);
+
+  // Per-company aggregates over the filtered posts, in site-card order.
+  const rows = useMemo(() => {
+    const bySite = {};
+    for (const p of filtered) {
+      const a = (bySite[p.site] = bySite[p.site] || {
+        total: 0,
+        samsung: 0,
+        competitor: 0, // competitor mentioned, Samsung not
+        s26: 0,
+        brands: {}, // brand -> posts mentioning it (any mention)
+        byPlatform: {},
+      });
+      a.total++;
+      if (p.samsung) a.samsung++;
+      else if ((p.brands || []).some((b) => b !== 'samsung')) a.competitor++;
+      if (p.s26) a.s26++;
+      for (const b of p.brands || []) a.brands[b] = (a.brands[b] || 0) + 1;
+      a.byPlatform[p.platform] = (a.byPlatform[p.platform] || 0) + 1;
+    }
+    return visible.filter((v) => bySite[v.id]).map((v) => ({ id: v.id, name: v.name, ...bySite[v.id] }));
+  }, [filtered, visible]);
+
+  const feed = useMemo(
+    () => (feedSite ? filtered.filter((p) => p.site === feedSite) : filtered),
+    [filtered, feedSite]
+  );
+
+  if (!posts.length) return null;
+
+  const total = filtered.length;
+  const samsung = rows.reduce((n, r) => n + r.samsung, 0);
+  const s26 = rows.reduce((n, r) => n + r.s26, 0);
   const sinceLabel = new Date(social.since).toLocaleString(undefined, { month: 'short', year: 'numeric' });
+  const setFilter = (set) => (v) => {
+    set(v);
+    setFeedLimit(FEED_PAGE);
+  };
+  const chips = (opts, val, set) =>
+    opts.map(([v, label]) => (
+      <button
+        key={v}
+        style={{ ...S.filterChip, ...(val === v ? S.filterChipOn : {}) }}
+        onClick={() => setFilter(set)(v)}
+      >
+        {label}
+      </button>
+    ));
 
   return (
     <section style={{ marginBottom: 24 }}>
@@ -743,8 +868,16 @@ function SocialSection({ social, visible }) {
         </span>
       </div>
       <div style={S.panel}>
+        <div style={S.socialFilters}>
+          <span style={S.filterLabel}>Period</span>
+          {chips(SOCIAL_PERIODS, period, setPeriod)}
+          <span style={{ ...S.filterLabel, marginLeft: 8 }}>Platform</span>
+          {chips(SOCIAL_PLATFORMS, platform, setPlatform)}
+          <span style={{ ...S.filterLabel, marginLeft: 8 }}>Content</span>
+          {chips(SOCIAL_CONTENT, content, setContent)}
+        </div>
         <div style={S.socialSummary}>
-          <span><strong>{total}</strong> posts tracked</span>
+          <span><strong>{total}</strong> posts match</span>
           <span>
             <i style={{ ...S.legendDot, background: '#1428a0' }} /> Samsung <strong>{samsung}</strong> ({total ? Math.round((samsung / total) * 1000) / 10 : 0}%)
           </span>
@@ -753,9 +886,41 @@ function SocialSection({ social, visible }) {
           </span>
           <span style={S.chipInfo}>Galaxy S26 posts · {s26}</span>
         </div>
-        {rows.map((s) => (
-          <SocialRow key={s.id} s={s} />
-        ))}
+        {total === 0 && <div style={S.noTrend}>No posts match these filters.</div>}
+        {total > 0 && (
+          <div style={S.socialCols}>
+            <div>
+              {rows.map((s) => (
+                <SocialRow
+                  key={s.id}
+                  s={s}
+                  selected={feedSite === s.id}
+                  onSelect={() => setFeedSite(feedSite === s.id ? null : s.id)}
+                />
+              ))}
+              <div style={S.socialHint}>Click a company to focus the post feed.</div>
+            </div>
+            <div>
+              <div style={S.feedHead}>
+                Latest posts{feedSite ? ` — ${nameOf[feedSite] || feedSite}` : ''}
+                <span style={{ fontWeight: 500, color: '#94a3b8' }}>({feed.length})</span>
+                {feedSite && (
+                  <button style={S.feedClear} onClick={() => setFeedSite(null)}>
+                    show all ✕
+                  </button>
+                )}
+              </div>
+              {feed.slice(0, feedLimit).map((p) => (
+                <SocialPost key={`${p.platform}:${p.id}`} p={p} siteName={nameOf[p.site] || p.site} />
+              ))}
+              {feed.length > feedLimit && (
+                <button style={S.feedMore} onClick={() => setFeedLimit(feedLimit + 20)}>
+                  Show more ({feed.length - feedLimit} remaining)
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1526,7 +1691,17 @@ const styles = {
     borderBottom: '1px solid #f1f5f9',
     marginBottom: 6,
   },
-  socialRow: { display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', borderBottom: '1px solid #f8fafc' },
+  socialFilters: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+    paddingBottom: 10,
+    marginBottom: 10,
+    borderBottom: '1px solid #f1f5f9',
+  },
+  socialCols: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(380px,1fr))', gap: 24, alignItems: 'start' },
+  socialRow: { display: 'flex', alignItems: 'center', gap: 14, padding: '9px 6px', borderBottom: '1px solid #f8fafc', borderRadius: 8, cursor: 'pointer' },
   socialSite: { width: 150, flexShrink: 0 },
   socialName: { fontWeight: 700, fontSize: 13 },
   socialPlatforms: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 },
@@ -1536,6 +1711,39 @@ const styles = {
   socialCaption: { fontSize: 11, color: '#64748b', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   socialNums: { textAlign: 'right', width: 56, flexShrink: 0 },
   socialTotal: { fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1 },
+  socialRowSelected: { background: '#eef4ff' },
+  socialHint: { fontSize: 10.5, color: '#cbd5e1', marginTop: 8 },
+
+  // Social post feed
+  feedHead: { display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, fontWeight: 700, color: '#334155', margin: '1px 0 4px' },
+  feedClear: {
+    background: '#f8fafc',
+    color: '#475569',
+    border: '1px solid #e2e8f0',
+    borderRadius: 999,
+    padding: '2px 10px',
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+    marginLeft: 'auto',
+  },
+  postRow: { display: 'block', padding: '8px 0', borderBottom: '1px solid #f8fafc', textDecoration: 'none', color: 'inherit' },
+  postMeta: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#94a3b8' },
+  postSite: { fontWeight: 700, color: '#334155', fontSize: 12 },
+  postBrand: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 600, color: '#64748b' },
+  postStats: { marginLeft: 'auto', whiteSpace: 'nowrap' },
+  postCaption: { fontSize: 12, color: '#475569', marginTop: 3, lineHeight: 1.5 },
+  feedMore: {
+    background: '#f8fafc',
+    border: '1px solid #e2e8f0',
+    borderRadius: 8,
+    padding: '6px 14px',
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#475569',
+    cursor: 'pointer',
+    marginTop: 10,
+  },
 
   twoCol: { display: 'grid', gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)', gap: 16 },
   panel: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 20, boxShadow: '0 1px 3px rgba(15,23,42,.05)' },

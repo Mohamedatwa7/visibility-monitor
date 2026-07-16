@@ -152,57 +152,29 @@ router.get('/api/log', async (req, res) => {
   }
 });
 
-// Social share-of-voice since SOCIAL_SINCE (2026-01-01): per site, how much of
-// its IG/TikTok/FB posting is Samsung vs competitor brands, and how many posts
-// mention the Galaxy S26. Categories are exclusive for the share split
-// (samsung > competitor > other); per-brand counts include every mention.
+// Social share-of-voice raw feed since SOCIAL_SINCE (2026-01-01). Returns the
+// flat classified post list (compact rows, trimmed captions) plus site
+// metadata — the dashboard aggregates client-side so its date/platform/content
+// filters recompute instantly without round-trips.
 router.get('/api/social', async (_req, res) => {
   try {
     const all = await store.getSocialPosts();
-    const sites = [];
-    const totals = { total: 0, samsung: 0, competitor: 0, s26: 0 };
-    for (const site of SITES) {
-      if (!site.social && !(all[site.id] || []).length) continue;
-      const posts = (all[site.id] || []).filter((p) => p.at >= SOCIAL_SINCE);
-      const agg = {
-        id: site.id,
-        name: site.name,
-        region: site.region,
-        type: site.type || 'operator',
-        handles: site.social || {},
-        total: posts.length,
-        samsung: 0,
-        competitor: 0, // competitor mentioned, Samsung not
-        other: 0,
-        s26: 0,
-        brands: {}, // brand -> posts mentioning it (any mention)
-        byPlatform: {},
-        monthly: {},
-      };
-      for (const p of posts) {
-        const rivals = (p.brands || []).filter((b) => b !== 'samsung');
-        if (p.samsung) agg.samsung++;
-        else if (rivals.length) agg.competitor++;
-        else agg.other++;
-        if (p.s26) agg.s26++;
-        for (const b of p.brands || []) agg.brands[b] = (agg.brands[b] || 0) + 1;
-        const pf = (agg.byPlatform[p.platform] = agg.byPlatform[p.platform] || { total: 0, samsung: 0, s26: 0 });
-        pf.total++;
-        if (p.samsung) pf.samsung++;
-        if (p.s26) pf.s26++;
-        const month = String(p.at).slice(0, 7);
-        const m = (agg.monthly[month] = agg.monthly[month] || { total: 0, samsung: 0, s26: 0 });
-        m.total++;
-        if (p.samsung) m.samsung++;
-        if (p.s26) m.s26++;
+    const sites = SITES.filter((s) => s.social || (all[s.id] || []).length).map((s) => ({
+      id: s.id,
+      name: s.name,
+      region: s.region,
+      type: s.type || 'operator',
+      handles: s.social || {},
+    }));
+    const posts = [];
+    for (const site of sites) {
+      for (const p of all[site.id] || []) {
+        if (p.at < SOCIAL_SINCE) continue;
+        posts.push({ site: site.id, ...p });
       }
-      totals.total += agg.total;
-      totals.samsung += agg.samsung;
-      totals.competitor += agg.competitor;
-      totals.s26 += agg.s26;
-      sites.push(agg);
     }
-    res.json({ since: SOCIAL_SINCE, sites, totals });
+    posts.sort((a, b) => (a.at < b.at ? 1 : -1)); // newest first
+    res.json({ since: SOCIAL_SINCE, sites, posts });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

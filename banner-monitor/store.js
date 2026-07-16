@@ -100,6 +100,9 @@ function createSqliteStore() {
   if (!cols.includes('promo_total')) db.exec('ALTER TABLE banner_runs ADD COLUMN promo_total INTEGER');
   // Competition analysis: per-brand breakdowns (sections, divisions, catalog, search).
   if (!cols.includes('competition')) db.exec('ALTER TABLE banner_runs ADD COLUMN competition TEXT');
+  // Caption snippet on social posts (added 2026-07-16 for the posts feed).
+  const socialCols = db.prepare('PRAGMA table_info(social_posts)').all().map((c) => c.name);
+  if (!socialCols.includes('caption')) db.exec('ALTER TABLE social_posts ADD COLUMN caption TEXT');
 
   const parse = (r) =>
     r && {
@@ -174,12 +177,12 @@ function createSqliteStore() {
     },
     async mergeSocialPosts(siteId, posts) {
       const stmt = db.prepare(
-        `INSERT INTO social_posts (site_id, platform, external_id, url, published_at, brands, samsung, s26, likes, comments, views, scraped_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO social_posts (site_id, platform, external_id, url, published_at, caption, brands, samsung, s26, likes, comments, views, scraped_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(platform, external_id) DO UPDATE SET
-           url = excluded.url, brands = excluded.brands, samsung = excluded.samsung,
-           s26 = excluded.s26, likes = excluded.likes, comments = excluded.comments,
-           views = excluded.views, scraped_at = excluded.scraped_at`
+           url = excluded.url, caption = excluded.caption, brands = excluded.brands,
+           samsung = excluded.samsung, s26 = excluded.s26, likes = excluded.likes,
+           comments = excluded.comments, views = excluded.views, scraped_at = excluded.scraped_at`
       );
       const now = new Date().toISOString();
       for (const p of posts || []) {
@@ -189,6 +192,7 @@ function createSqliteStore() {
           String(p.id),
           p.url || null,
           p.at,
+          p.caption || null,
           JSON.stringify(p.brands || []),
           p.samsung ? 1 : 0,
           p.s26 ? 1 : 0,
@@ -209,6 +213,7 @@ function createSqliteStore() {
           id: r.external_id,
           url: r.url,
           at: r.published_at,
+          caption: r.caption || '',
           brands: safeJson(r.brands, []),
           samsung: !!r.samsung,
           s26: !!r.s26,
