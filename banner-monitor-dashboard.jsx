@@ -702,7 +702,7 @@ function fmtCount(n) {
 // that period's posting volume, split into Samsung / competitor / everything
 // else, with Samsung's share of voice printed on top — this is where campaign
 // pushes become visible. Weekly view shows the last 13 weeks (~a quarter).
-function PostingChart({ posts, bucket, title }) {
+function PostingChart({ posts, bucket, title, rival }) {
   const S = styles;
   const startOfWeek = (iso) => {
     const d = new Date(iso);
@@ -715,13 +715,18 @@ function PostingChart({ posts, bucket, title }) {
       ? (k) => new Date(`${k}T00:00:00Z`).toLocaleString(undefined, { day: 'numeric', month: 'short' })
       : (k) => new Date(`${k}-01T00:00:00Z`).toLocaleString(undefined, { month: 'short' });
 
+  // With a rival picked, the red segment narrows to posts featuring that one
+  // brand (and not Samsung); otherwise it is any competitor mention.
+  const isRival = rival
+    ? (p) => (p.brands || []).includes(rival)
+    : (p) => (p.brands || []).some((b) => b !== 'samsung');
   const buckets = {};
   for (const p of posts) {
     const key = keyOf(p);
     const m = (buckets[key] = buckets[key] || { total: 0, samsung: 0, competitor: 0 });
     m.total++;
     if (p.samsung) m.samsung++;
-    else if ((p.brands || []).some((b) => b !== 'samsung')) m.competitor++;
+    else if (isRival(p)) m.competitor++;
   }
   let keys = Object.keys(buckets).sort();
   if (bucket === 'week') keys = keys.slice(-13);
@@ -748,7 +753,7 @@ function PostingChart({ posts, bucket, title }) {
             <div
               key={k}
               style={S.monthCol}
-              title={`${bucket === 'week' ? 'Week of ' : ''}${label}: ${m.total} posts — ${m.samsung} Samsung, ${m.competitor} competitor-only, ${other} other`}
+              title={`${bucket === 'week' ? 'Week of ' : ''}${label}: ${m.total} posts — ${m.samsung} Samsung, ${m.competitor} ${rival ? brandMeta(rival).label : 'competitor'}, ${other} other`}
             >
               <div style={S.monthPct}>{sov}%</div>
               <div style={{ ...S.monthBar, height: Math.max(px(m.total), 3) }}>
@@ -775,6 +780,11 @@ function CompanyVoiceRow({ rank, s, selected, onSelect }) {
   const rivals = Object.entries(s.rivalBrands || {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4);
+  // Samsung's lead (in percentage points of this company's posts) over its
+  // most-mentioned competitor there.
+  const topRival = rivals[0] || null;
+  const topRivalPct = topRival ? Math.round((topRival[1] / s.total) * 1000) / 10 : 0;
+  const lead = Math.round((samsungPct - topRivalPct) * 10) / 10;
   const platforms = ['instagram', 'tiktok', 'facebook']
     .map((pf) => (s.samsungByPf[pf] ? `${PLATFORM_LABELS[pf]} ${s.samsungByPf[pf]}` : null))
     .filter(Boolean)
@@ -814,8 +824,18 @@ function CompanyVoiceRow({ rank, s, selected, onSelect }) {
         S26 · {s.s26}
       </span>
       <div style={S.socialNums}>
-        <div style={{ ...S.socialTotal, color: '#1428a0' }}>{s.samsung}</div>
-        <div style={S.countLabel}>Samsung posts</div>
+        <div
+          style={{ ...S.socialTotal, fontSize: 17, color: lead > 0 ? '#047857' : lead < 0 ? '#b91c1c' : '#475569' }}
+          title={
+            topRival
+              ? `Samsung ${samsungPct}% vs ${brandMeta(topRival[0]).label} ${topRivalPct}% of this company's posts`
+              : `Samsung ${samsungPct}% — no competitor mentions here`
+          }
+        >
+          {lead > 0 ? '+' : ''}
+          {lead} pt
+        </div>
+        <div style={S.countLabel}>{topRival ? `vs ${brandMeta(topRival[0]).label}` : 'no rivals'}</div>
       </div>
     </div>
   );
@@ -868,6 +888,7 @@ function SocialTab({ social, visible }) {
   const [from, setFrom] = useState(''); // custom date range (YYYY-MM-DD); overrides the period presets
   const [to, setTo] = useState('');
   const [chartSites, setChartSites] = useState(null); // null = all companies on the trend charts
+  const [chartRival, setChartRival] = useState(null); // null = all competitors on the trend charts
   const [feedSite, setFeedSite] = useState(null);
   const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
 
@@ -904,8 +925,8 @@ function SocialTab({ social, visible }) {
       if (p.s26) s26++;
       for (const b of p.brands || []) if (b !== 'samsung') rivalMentions[b] = (rivalMentions[b] || 0) + 1;
     }
-    const topRival = Object.entries(rivalMentions).sort((a, b) => b[1] - a[1])[0] || null;
-    return { total: filtered.length, samsung, s26, topRival };
+    const rivals = Object.entries(rivalMentions).sort((a, b) => b[1] - a[1]);
+    return { total: filtered.length, samsung, s26, topRival: rivals[0] || null, rivals };
   }, [filtered]);
 
   // Per-company aggregates, ranked by Samsung's share of their posts.
@@ -1063,7 +1084,7 @@ function SocialTab({ social, visible }) {
 
       {/* posting trends: month by month + week by week, with a company picker */}
       <div style={{ ...S.panel, marginBottom: 16 }}>
-        <div style={S.chartFilterRow}>
+        <div style={{ ...S.chartFilterRow, borderBottom: 'none', marginBottom: 2, paddingBottom: 4 }}>
           <span style={S.filterLabel}>Companies</span>
           <button style={{ ...S.filterChip, ...(!chartSites ? S.filterChipOn : {}) }} onClick={() => setChartSites(null)}>
             All
@@ -1086,14 +1107,36 @@ function SocialTab({ social, visible }) {
           ))}
           <span style={S.filterCount}>pick one or more — charts update instantly</span>
         </div>
-        <PostingChart posts={chartPosts} bucket="month" title="Month by month — how much of the posting features Samsung" />
+        <div style={S.chartFilterRow}>
+          <span style={S.filterLabel}>Versus</span>
+          <button style={{ ...S.filterChip, ...(!chartRival ? S.filterChipOn : {}) }} onClick={() => setChartRival(null)}>
+            All competitors
+          </button>
+          {kpis.rivals.slice(0, 8).map(([b]) => (
+            <button
+              key={b}
+              style={{ ...S.filterChip, ...(chartRival === b ? S.filterChipOn : {}) }}
+              onClick={() => setChartRival(chartRival === b ? null : b)}
+            >
+              {brandMeta(b).label}
+            </button>
+          ))}
+          <span style={S.filterCount}>pick the rival to measure Samsung against</span>
+        </div>
+        <PostingChart posts={chartPosts} bucket="month" rival={chartRival} title="Month by month — how much of the posting features Samsung" />
         <div style={{ marginTop: 18 }}>
-          <PostingChart posts={chartPosts} bucket="week" title="Week by week — the last 13 weeks in detail" />
+          <PostingChart posts={chartPosts} bucket="week" rival={chartRival} title="Week by week — the last 13 weeks in detail" />
         </div>
         <div style={{ ...S.legendRow, flexWrap: 'wrap', marginTop: 12 }}>
           <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#1428a0' }} /> Samsung posts</span>
-          <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#e11d48' }} /> competitor posts</span>
-          <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#e2e8f0' }} /> everything else (offers, lifestyle…)</span>
+          <span style={S.legendItem}>
+            <i style={{ ...S.legendDot, background: '#e11d48' }} />{' '}
+            {chartRival ? `${brandMeta(chartRival).label} posts (without Samsung)` : 'competitor posts'}
+          </span>
+          <span style={S.legendItem}>
+            <i style={{ ...S.legendDot, background: '#e2e8f0' }} />{' '}
+            {chartRival ? 'everything else (incl. other brands)' : 'everything else (offers, lifestyle…)'}
+          </span>
           <span style={{ ...S.legendItem, marginLeft: 'auto' }}>% = Samsung's share of that period's posts</span>
         </div>
       </div>
@@ -1988,7 +2031,7 @@ const styles = {
   socialBar: { display: 'flex', height: 10, borderRadius: 999, background: '#f1f5f9', overflow: 'hidden' },
   socialSeg: { height: '100%' },
   socialCaption: { fontSize: 11, color: '#64748b', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  socialNums: { textAlign: 'right', width: 56, flexShrink: 0 },
+  socialNums: { textAlign: 'right', width: 74, flexShrink: 0 },
   socialTotal: { fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1 },
   socialRowSelected: { background: '#eef4ff' },
   // Wraps instead of truncating so every competitor stays readable.
