@@ -698,41 +698,57 @@ function fmtCount(n) {
   return n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n);
 }
 
-// Month-by-month stacked columns: each bar is that month's posting volume,
-// split into Samsung / competitor / everything else, with Samsung's share of
-// voice printed on top — this is where campaign pushes become visible.
-function MonthlyChart({ posts }) {
+// Stacked posting-volume columns bucketed by month or ISO week: each bar is
+// that period's posting volume, split into Samsung / competitor / everything
+// else, with Samsung's share of voice printed on top — this is where campaign
+// pushes become visible. Weekly view shows the last 13 weeks (~a quarter).
+function PostingChart({ posts, bucket, title }) {
   const S = styles;
-  const months = {};
+  const startOfWeek = (iso) => {
+    const d = new Date(iso);
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); // back to Monday
+    return d.toISOString().slice(0, 10);
+  };
+  const keyOf = bucket === 'week' ? (p) => startOfWeek(p.at) : (p) => String(p.at).slice(0, 7);
+  const labelOf =
+    bucket === 'week'
+      ? (k) => new Date(`${k}T00:00:00Z`).toLocaleString(undefined, { day: 'numeric', month: 'short' })
+      : (k) => new Date(`${k}-01T00:00:00Z`).toLocaleString(undefined, { month: 'short' });
+
+  const buckets = {};
   for (const p of posts) {
-    const key = String(p.at).slice(0, 7);
-    const m = (months[key] = months[key] || { total: 0, samsung: 0, competitor: 0 });
+    const key = keyOf(p);
+    const m = (buckets[key] = buckets[key] || { total: 0, samsung: 0, competitor: 0 });
     m.total++;
     if (p.samsung) m.samsung++;
     else if ((p.brands || []).some((b) => b !== 'samsung')) m.competitor++;
   }
-  const keys = Object.keys(months).sort();
-  if (keys.length < 2) return null;
-  const max = Math.max(...keys.map((k) => months[k].total));
+  let keys = Object.keys(buckets).sort();
+  if (bucket === 'week') keys = keys.slice(-13);
+  if (keys.length < 2) {
+    return <div style={S.noTrend}>Not enough data in this selection for a {bucket}-by-{bucket} view.</div>;
+  }
+  const max = Math.max(...keys.map((k) => buckets[k].total));
   const H = 110;
   const px = (n) => Math.round((n / max) * H);
 
   return (
     <div>
       <div style={S.chartTitleRow}>
-        <span style={S.chartTitle}>Month by month — how much of the posting features Samsung</span>
+        <span style={S.chartTitle}>{title}</span>
+        <span style={S.chartHint}>% = Samsung's share</span>
       </div>
       <div style={S.monthRow}>
         {keys.map((k) => {
-          const m = months[k];
+          const m = buckets[k];
           const other = m.total - m.samsung - m.competitor;
           const sov = m.total ? Math.round((m.samsung / m.total) * 100) : 0;
-          const label = new Date(`${k}-01T00:00:00Z`).toLocaleString(undefined, { month: 'short' });
+          const label = labelOf(k);
           return (
             <div
               key={k}
               style={S.monthCol}
-              title={`${label}: ${m.total} posts — ${m.samsung} Samsung, ${m.competitor} competitor-only, ${other} other`}
+              title={`${bucket === 'week' ? 'Week of ' : ''}${label}: ${m.total} posts — ${m.samsung} Samsung, ${m.competitor} competitor-only, ${other} other`}
             >
               <div style={S.monthPct}>{sov}%</div>
               <div style={{ ...S.monthBar, height: Math.max(px(m.total), 3) }}>
@@ -746,29 +762,18 @@ function MonthlyChart({ posts }) {
           );
         })}
       </div>
-      <div style={{ ...S.legendRow, flexWrap: 'wrap' }}>
-        <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#1428a0' }} /> Samsung posts</span>
-        <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#e11d48' }} /> competitor posts</span>
-        <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#e2e8f0' }} /> everything else (offers, lifestyle…)</span>
-        <span style={{ ...S.legendItem, marginLeft: 'auto' }}>% = Samsung's share of that month's posts</span>
-      </div>
     </div>
   );
 }
 
-// One company in the share-of-voice ranking: its posting volume and how much
-// of it features Samsung. Click to focus the post feed on that company.
+// One company in the share-of-voice ranking — Samsung only, no competitor
+// noise: how many of its posts feature Samsung and what share of its feed
+// that is. Click to see its Samsung posts in the feed.
 function CompanyVoiceRow({ rank, s, selected, onSelect }) {
   const S = styles;
-  const pct = (n) => (s.total ? Math.round((n / s.total) * 1000) / 10 : 0);
-  const samsungPct = pct(s.samsung);
-  const rivalPct = pct(s.competitor);
-  const topRivals = Object.entries(s.brands || {})
-    .filter(([b]) => b !== 'samsung')
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3);
+  const samsungPct = s.total ? Math.round((s.samsung / s.total) * 1000) / 10 : 0;
   const platforms = ['instagram', 'tiktok', 'facebook']
-    .map((pf) => (s.byPlatform[pf] ? `${PLATFORM_LABELS[pf]} ${s.byPlatform[pf]}` : null))
+    .map((pf) => (s.samsungByPf[pf] ? `${PLATFORM_LABELS[pf]} ${s.samsungByPf[pf]}` : null))
     .filter(Boolean)
     .join(' · ');
 
@@ -776,29 +781,27 @@ function CompanyVoiceRow({ rank, s, selected, onSelect }) {
     <div
       style={{ ...S.socialRow, ...(selected ? S.socialRowSelected : {}) }}
       onClick={onSelect}
-      title={selected ? 'Feed is focused on this company — click to show all' : 'Click to focus the post feed on this company'}
+      title={selected ? 'Feed is focused on this company — click to show all' : "Click to see this company's Samsung posts in the feed"}
     >
       <span style={S.lbRank}>{rank}</span>
       <div style={S.socialSite}>
         <div style={S.socialName}>{s.name}</div>
-        <div style={S.socialPlatforms}>{platforms || 'no posts in this selection'}</div>
+        <div style={S.socialPlatforms}>{platforms ? `Samsung posts: ${platforms}` : 'no Samsung posts in this selection'}</div>
       </div>
       <div style={S.socialBarWrap}>
-        <div style={S.socialBar} title={`Samsung ${samsungPct}% · competitors ${rivalPct}% · everything else ${Math.max(0, Math.round((100 - samsungPct - rivalPct) * 10) / 10)}%`}>
+        <div style={S.socialBar} title={`${samsungPct}% of this company's posts feature Samsung`}>
           <div style={{ ...S.socialSeg, width: `${samsungPct}%`, background: '#1428a0' }} />
-          <div style={{ ...S.socialSeg, width: `${rivalPct}%`, background: '#e11d48' }} />
         </div>
         <div style={S.socialCaption}>
-          Samsung in <strong>{samsungPct}%</strong> of its posts · competitors in <strong>{rivalPct}%</strong>
-          {topRivals.length > 0 && <span style={{ color: '#94a3b8' }}> — loudest: {topRivals.map(([b, n]) => `${brandMeta(b).label} ${n}`).join(', ')}</span>}
+          <strong>{s.samsung}</strong> of its {s.total} posts feature Samsung (<strong>{samsungPct}%</strong>)
         </div>
       </div>
       <span style={S.chipInfo} title="Posts mentioning the Galaxy S26 series">
         S26 · {s.s26}
       </span>
       <div style={S.socialNums}>
-        <div style={S.socialTotal}>{s.total}</div>
-        <div style={S.countLabel}>posts</div>
+        <div style={{ ...S.socialTotal, color: '#1428a0' }}>{s.samsung}</div>
+        <div style={S.countLabel}>Samsung posts</div>
       </div>
     </div>
   );
@@ -848,6 +851,9 @@ function SocialTab({ social, visible }) {
   const [period, setPeriod] = useState('all');
   const [platform, setPlatform] = useState('all');
   const [content, setContent] = useState('all');
+  const [from, setFrom] = useState(''); // custom date range (YYYY-MM-DD); overrides the period presets
+  const [to, setTo] = useState('');
+  const [chartSites, setChartSites] = useState(null); // null = all companies on the trend charts
   const [feedSite, setFeedSite] = useState(null);
   const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
 
@@ -859,14 +865,20 @@ function SocialTab({ social, visible }) {
   const visibleIds = useMemo(() => new Set(visible.map((v) => v.id)), [visible]);
 
   const filtered = useMemo(() => {
-    const cutoff = period === 'all' ? null : new Date(Date.now() - Number(period) * DAY).toISOString();
-    return posts.filter(
-      (p) =>
-        visibleIds.has(p.site) &&
-        (!cutoff || p.at >= cutoff) &&
-        (platform === 'all' || p.platform === platform)
-    );
-  }, [posts, visibleIds, period, platform]);
+    const custom = Boolean(from || to);
+    const cutoff = !custom && period !== 'all' ? new Date(Date.now() - Number(period) * DAY).toISOString() : null;
+    return posts.filter((p) => {
+      if (!visibleIds.has(p.site)) return false;
+      if (custom) {
+        const day = String(p.at).slice(0, 10);
+        if (from && day < from) return false;
+        if (to && day > to) return false;
+      } else if (cutoff && p.at < cutoff) {
+        return false;
+      }
+      return platform === 'all' || p.platform === platform;
+    });
+  }, [posts, visibleIds, period, platform, from, to]);
 
   // Headline numbers over the filtered posts.
   const kpis = useMemo(() => {
@@ -886,26 +898,24 @@ function SocialTab({ social, visible }) {
   const rows = useMemo(() => {
     const bySite = {};
     for (const p of filtered) {
-      const a = (bySite[p.site] = bySite[p.site] || {
-        total: 0,
-        samsung: 0,
-        competitor: 0, // competitor mentioned, Samsung not
-        s26: 0,
-        brands: {}, // brand -> posts mentioning it (any mention)
-        byPlatform: {},
-      });
+      const a = (bySite[p.site] = bySite[p.site] || { total: 0, samsung: 0, s26: 0, samsungByPf: {} });
       a.total++;
-      if (p.samsung) a.samsung++;
-      else if ((p.brands || []).some((b) => b !== 'samsung')) a.competitor++;
+      if (p.samsung) {
+        a.samsung++;
+        a.samsungByPf[p.platform] = (a.samsungByPf[p.platform] || 0) + 1;
+      }
       if (p.s26) a.s26++;
-      for (const b of p.brands || []) a.brands[b] = (a.brands[b] || 0) + 1;
-      a.byPlatform[p.platform] = (a.byPlatform[p.platform] || 0) + 1;
     }
     return visible
       .filter((v) => bySite[v.id])
       .map((v) => ({ id: v.id, name: v.name, ...bySite[v.id] }))
-      .sort((a, b) => b.samsung / b.total - a.samsung / a.total || b.total - a.total);
+      .sort((a, b) => b.samsung / b.total - a.samsung / a.total || b.samsung - a.samsung);
   }, [filtered, visible]);
+
+  const chartPosts = useMemo(
+    () => (chartSites && chartSites.length ? filtered.filter((p) => chartSites.includes(p.site)) : filtered),
+    [filtered, chartSites]
+  );
 
   const feed = useMemo(
     () =>
@@ -961,7 +971,54 @@ function SocialTab({ social, visible }) {
       <section style={S.filterBar}>
         <div style={S.filterGroup}>
           <span style={S.filterLabel}>Period</span>
-          {chips(SOCIAL_PERIODS, period, setPeriod)}
+          {SOCIAL_PERIODS.map(([v, label]) => (
+            <button
+              key={v}
+              style={{ ...S.filterChip, ...(period === v && !from && !to ? S.filterChipOn : {}) }}
+              onClick={() => {
+                setPeriod(v);
+                setFrom('');
+                setTo('');
+                setFeedLimit(FEED_PAGE);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+          <input
+            type="date"
+            value={from}
+            min={social.since}
+            style={{ ...S.dateInput, ...(from ? S.dateInputOn : {}) }}
+            onChange={(e) => {
+              setFrom(e.target.value);
+              setFeedLimit(FEED_PAGE);
+            }}
+            title="Or pick any start date"
+          />
+          <span style={{ color: '#94a3b8', fontSize: 11 }}>to</span>
+          <input
+            type="date"
+            value={to}
+            min={social.since}
+            style={{ ...S.dateInput, ...(to ? S.dateInputOn : {}) }}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setFeedLimit(FEED_PAGE);
+            }}
+            title="Or pick any end date"
+          />
+          {(from || to) && (
+            <button
+              style={{ ...S.feedClear, marginLeft: 0 }}
+              onClick={() => {
+                setFrom('');
+                setTo('');
+              }}
+            >
+              clear ✕
+            </button>
+          )}
         </div>
         <div style={S.filterGroup}>
           <span style={S.filterLabel}>Platform</span>
@@ -1000,9 +1057,41 @@ function SocialTab({ social, visible }) {
         </div>
       </section>
 
-      {/* month-by-month trend */}
+      {/* posting trends: month by month + week by week, with a company picker */}
       <div style={{ ...S.panel, marginBottom: 16 }}>
-        <MonthlyChart posts={filtered} />
+        <div style={S.chartFilterRow}>
+          <span style={S.filterLabel}>Companies</span>
+          <button style={{ ...S.filterChip, ...(!chartSites ? S.filterChipOn : {}) }} onClick={() => setChartSites(null)}>
+            All
+          </button>
+          {rows.map((r) => (
+            <button
+              key={r.id}
+              style={{ ...S.filterChip, ...(chartSites && chartSites.includes(r.id) ? S.filterChipOn : {}) }}
+              onClick={() =>
+                setChartSites((cur) => {
+                  const next = new Set(cur || []);
+                  if (next.has(r.id)) next.delete(r.id);
+                  else next.add(r.id);
+                  return next.size ? Array.from(next) : null;
+                })
+              }
+            >
+              {r.name}
+            </button>
+          ))}
+          <span style={S.filterCount}>pick one or more — charts update instantly</span>
+        </div>
+        <PostingChart posts={chartPosts} bucket="month" title="Month by month — how much of the posting features Samsung" />
+        <div style={{ marginTop: 18 }}>
+          <PostingChart posts={chartPosts} bucket="week" title="Week by week — the last 13 weeks in detail" />
+        </div>
+        <div style={{ ...S.legendRow, flexWrap: 'wrap', marginTop: 12 }}>
+          <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#1428a0' }} /> Samsung posts</span>
+          <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#e11d48' }} /> competitor posts</span>
+          <span style={S.legendItem}><i style={{ ...S.legendDot, background: '#e2e8f0' }} /> everything else (offers, lifestyle…)</span>
+          <span style={{ ...S.legendItem, marginLeft: 'auto' }}>% = Samsung's share of that period's posts</span>
+        </div>
       </div>
 
       {/* company ranking + the actual posts */}
@@ -1020,12 +1109,14 @@ function SocialTab({ social, visible }) {
                 s={s}
                 selected={feedSite === s.id}
                 onSelect={() => {
-                  setFeedSite(feedSite === s.id ? null : s.id);
+                  const focusing = feedSite !== s.id;
+                  setFeedSite(focusing ? s.id : null);
+                  if (focusing) setContent('samsung'); // this ranking is about Samsung voice — show those posts
                   setFeedLimit(FEED_PAGE);
                 }}
               />
             ))}
-            <div style={S.socialHint}>Click a company to see only its posts in the feed.</div>
+            <div style={S.socialHint}>Click a company to see its Samsung posts in the feed.</div>
           </div>
           <div>
             <div style={S.feedHead}>
@@ -1721,6 +1812,26 @@ const styles = {
   },
   filterChipOn: { background: '#1428a0', color: '#fff', borderColor: '#1428a0' },
   filterCount: { marginLeft: 'auto', fontSize: 12, color: '#94a3b8' },
+  dateInput: {
+    background: '#f8fafc',
+    color: '#475569',
+    border: '1px solid #e2e8f0',
+    borderRadius: 999,
+    padding: '3px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+    fontFamily: 'inherit',
+  },
+  dateInputOn: { background: '#1428a0', color: '#fff', borderColor: '#1428a0' },
+  chartFilterRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+    paddingBottom: 10,
+    marginBottom: 12,
+    borderBottom: '1px solid #f1f5f9',
+  },
   kpiRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))',
