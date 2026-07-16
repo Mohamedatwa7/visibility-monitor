@@ -500,7 +500,7 @@ function CompetitionCard({ site, onFlip }) {
     Object.keys(placements).length || (c.devices && Object.keys(c.devices).length) || (c.search && Object.keys(c.search).length);
 
   return (
-    <div style={S.card}>
+    <div style={{ ...S.card, height: '100%', boxSizing: 'border-box' }}>
       <div style={S.cardTop}>
         <div>
           <div style={S.siteName}>{site.name}</div>
@@ -772,11 +772,24 @@ export default function BannerMonitorDashboard() {
 
   // ---- filters (country + operators/retailers) ----
   const countries = useMemo(() => Array.from(new Set(sites.map((s) => s.region))).sort(), [sites]);
+  // Card order: operators first, then retailers, each grouped by country
+  // (alphabetical) and by name within a country. Grouping same-type sites
+  // together also keeps grid rows at similar heights (operator cards carry
+  // fewer metrics than retailer cards).
   const visible = useMemo(
     () =>
-      sites.filter(
-        (s) => (countryFilter === 'all' || s.region === countryFilter) && (typeFilter === 'all' || s.type === typeFilter)
-      ),
+      sites
+        .filter(
+          (s) => (countryFilter === 'all' || s.region === countryFilter) && (typeFilter === 'all' || s.type === typeFilter)
+        )
+        .sort((a, b) => {
+          const typeRank = (s) => (s.type === 'operator' ? 0 : 1);
+          return (
+            typeRank(a) - typeRank(b) ||
+            (a.region || '').localeCompare(b.region || '') ||
+            (a.name || '').localeCompare(b.name || '')
+          );
+        }),
     [sites, countryFilter, typeFilter]
   );
   const visibleIds = useMemo(() => new Set(visible.map((s) => s.id)), [visible]);
@@ -1282,6 +1295,10 @@ const styles = {
     backfaceVisibility: 'hidden',
     WebkitBackfaceVisibility: 'hidden',
     boxSizing: 'border-box',
+    // Fill the grid cell (rows stretch to the tallest card) so card borders
+    // line up across a row instead of ending at ragged heights.
+    height: '100%',
+    minHeight: 0,
   },
   flipFaceBack: { transform: 'rotateY(180deg)' },
   flipFaceHidden: { position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' },
