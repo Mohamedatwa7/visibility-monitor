@@ -1198,22 +1198,30 @@ function SiteDetail({ site, onBack }) {
         </div>
       </div>
 
+      {/* one unified switch: flips both cards together */}
+      <div style={T.viewToggleRow}>
+        <button
+          className="vm-press"
+          style={{ ...T.chip, ...(!flipped ? T.chipOn : {}) }}
+          onClick={() => setFlipped(false)}
+        >
+          Samsung overview
+        </button>
+        <button
+          className="vm-press"
+          style={{ ...T.chip, ...(flipped ? T.chipOn : {}) }}
+          onClick={() => setFlipped(true)}
+        >
+          Competition analysis
+        </button>
+      </div>
+
       <div style={T.detailGrid}>
         <div style={T.flipOuter}>
           <div style={{ ...T.flipInner, transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
             {/* front: Samsung metrics */}
             <div style={{ ...T.panel, ...T.flipFace, ...(flipped ? T.flipHidden : {}) }}>
-              <div style={T.panelTitle}>
-                Samsung's share, metric by metric
-                <button
-                  className="vm-press"
-                  style={{ ...T.chip, marginLeft: 'auto' }}
-                  onClick={() => setFlipped(true)}
-                  title="Flip both cards to the full competition analysis"
-                >
-                  Competition →
-                </button>
-              </div>
+              <div style={T.panelTitle}>Samsung's share, metric by metric</div>
               {metrics.map((m) =>
             m.pct == null && m.d == null ? null : (
               <div key={m.key} style={T.metricRow}>
@@ -1247,17 +1255,7 @@ function SiteDetail({ site, onBack }) {
 
             {/* back: competition brand leaderboards */}
             <div style={{ ...T.panel, ...T.flipFace, ...T.flipBack, ...(flipped ? {} : T.flipHidden) }}>
-              <div style={T.panelTitle}>
-                Samsung vs rival brands
-                <button
-                  className="vm-press"
-                  style={{ ...T.chip, marginLeft: 'auto' }}
-                  onClick={() => setFlipped(false)}
-                  title="Flip both cards back to the Samsung overview"
-                >
-                  ← Overview
-                </button>
-              </div>
+              <div style={T.panelTitle}>Samsung vs rival brands</div>
               {!hasCompetition && (
                 <div style={T.empty}>
                   No competition data captured yet — brand breakdowns appear after the next check.
@@ -1288,17 +1286,7 @@ function SiteDetail({ site, onBack }) {
           <div style={{ ...T.flipInner, transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
             {/* front: Samsung trends + shelf positions */}
             <div style={{ ...T.panel, ...T.flipFace, ...(flipped ? T.flipHidden : {}) }}>
-              <div style={T.panelTitle}>
-                Trends & shelf positions
-                <button
-                  className="vm-press"
-                  style={{ ...T.chip, marginLeft: 'auto' }}
-                  onClick={() => setFlipped(true)}
-                  title="Flip both cards to the full competition analysis"
-                >
-                  Competition →
-                </button>
-              </div>
+              <div style={T.panelTitle}>Trends & shelf positions</div>
               <TrendChart title="Samsung share over time (%)" history={site.history} />
               {site.deviceShare && Array.isArray(site.deviceShare.positions) && site.deviceShare.positions.length > 0 && (
                 <div style={{ marginTop: 18 }}>
@@ -1309,17 +1297,7 @@ function SiteDetail({ site, onBack }) {
 
             {/* back: competition over time */}
             <div style={{ ...T.panel, ...T.flipFace, ...T.flipBack, ...(flipped ? {} : T.flipHidden) }}>
-              <div style={T.panelTitle}>
-                Competition over time
-                <button
-                  className="vm-press"
-                  style={{ ...T.chip, marginLeft: 'auto' }}
-                  onClick={() => setFlipped(false)}
-                  title="Flip both cards back to the Samsung overview"
-                >
-                  ← Overview
-                </button>
-              </div>
+              <div style={T.panelTitle}>Competition over time</div>
               {!hasCompetition && (
                 <div style={T.empty}>
                   No competition data captured yet — brand trends appear after the next check.
@@ -3050,6 +3028,8 @@ const styles = {
     whiteSpace: 'nowrap',
   },
   detailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 18 },
+
+  viewToggleRow: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 },
 
   // Metric-card flip (front = metrics, back = competition leaderboards). The
   // hidden face is absolutely positioned so the visible one drives the height.
