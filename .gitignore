@@ -11,3 +11,9 @@ tmp-*.js
 
 # separate local Python project — not part of the deployed monitor
 samsung-visibility-audit/
+
+# local agent tooling (installed skill packs, symlinks, design scaffolding)
+.agents/
+.claude/
+.superdesign/
+skills-lock.json
