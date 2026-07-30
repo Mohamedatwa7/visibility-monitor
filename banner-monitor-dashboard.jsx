@@ -62,6 +62,14 @@ function fmtCount(n) {
   return n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n);
 }
 
+// 1 -> "first", 2 -> "2nd", 3 -> "3rd", 11 -> "11th"…
+function ordinal(n) {
+  if (n === 1) return 'first';
+  const v = n % 100;
+  const suffix = v >= 11 && v <= 13 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th';
+  return `${n}${suffix}`;
+}
+
 const DAY = 86400000;
 
 // Latest value of `key` recorded at or before (latest run - daysAgo).
@@ -1158,6 +1166,13 @@ function SiteDetail({ site, onBack }) {
   const avg = avgShareOf(site);
   const dCounts = deviceCountsOf(site);
   const present = DEVICE_FAMILIES.filter((f) => dCounts[f.key]);
+  // Where Samsung's hero banners sit in the carousel (1 = the slide shown
+  // first). `pos` is recorded by the scraper per placement; older runs
+  // without it simply show nothing.
+  const heroSlots = ((site.assets && site.assets.hero) || [])
+    .map((a) => a.pos)
+    .filter((n) => n != null)
+    .sort((a, b) => a - b);
   const c = site.competition || {};
   const placements = mergeBrandMaps(c.hero, c.promo, c.tiles);
   const divisions = Object.entries(c.divisions || {}).filter(([, brands]) => Object.keys(brands).length >= 2);
@@ -1240,6 +1255,14 @@ function SiteDetail({ site, onBack }) {
                 <div style={T.metricMoves}>
                   <Move label="WoW" now={m.pct} then={m.wow} unit="%" />
                   <Move label="MoM" now={m.pct} then={m.mom} unit="%" />
+                  {m.key === 'hero' && heroSlots.length > 0 && (
+                    <Tag
+                      tone={heroSlots[0] === 1 ? 'green' : 'neutral'}
+                      title="Where Samsung's banners sit in the hero carousel — first means the slide visitors see before any rotation"
+                    >
+                      carousel: {heroSlots.map(ordinal).join(' & ')}
+                    </Tag>
+                  )}
                   {m.key === 'shelf' && site.deviceShare && site.deviceShare.pages > 1 && (
                     <span style={T.moveMuted}>first {site.deviceShare.pages} pages</span>
                   )}

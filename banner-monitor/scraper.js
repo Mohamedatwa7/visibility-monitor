@@ -491,7 +491,12 @@ async function countSamsungBanners(site) {
           )
         );
       }
-      const matches = all.filter((r) => r.samsung).map(({ key, src, alt, href }) => ({ key, src, alt, href }));
+      // pos = 1-based slot within this section in document order — for the
+      // hero section that is the carousel slide number (1 = shown first).
+      const matches = all
+        .map((r, i) => ({ r, pos: i + 1 }))
+        .filter((x) => x.r.samsung)
+        .map(({ r, pos }) => ({ key: r.key, src: r.src, alt: r.alt, href: r.href, pos }));
       return { count: matches.length, total: all.length, matches, brands: brandTally(all) };
     };
 
