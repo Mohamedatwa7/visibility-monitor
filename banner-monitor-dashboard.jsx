@@ -1424,6 +1424,22 @@ const SOCIAL_CONTENT = [
 ];
 const FEED_PAGE = 8;
 
+// Launch products the spotlight KPI can switch between. S26 uses the
+// backend's classification of the full caption; the others are matched
+// client-side against the stored caption snippet.
+const SPOTLIGHT_PRODUCTS = [
+  { key: 's26', label: 'S26', full: 'Galaxy S26 series', match: (p) => !!p.s26 },
+  {
+    key: 'fold8',
+    label: 'Fold8/Flip8',
+    full: 'Fold8, Fold8 Ultra & Flip8',
+    re: /(?:z\s*)?fold\s?8(?:\s*ultra)?|(?:z\s*)?flip\s?8/i,
+  },
+  { key: 'watch9', label: 'Watch9', full: 'Galaxy Watch9', re: /watch\s?9(?!\d)/i },
+  { key: 'watchu2', label: 'Watch Ultra2', full: 'Galaxy Watch Ultra 2', re: /watch\s?ultra\s?2(?!\d)/i },
+];
+const spotlightHit = (sp, p) => (sp.match ? sp.match(p) : sp.re.test(p.caption || ''));
+
 function CompanyRow({ rank, s, selected, onSelect }) {
   const T = styles;
   const samsungPct = s.total ? Math.round((s.samsung / s.total) * 1000) / 10 : 0;
@@ -1529,6 +1545,7 @@ function SocialView({ social }) {
   const [chartRival, setChartRival] = useState(null);
   const [feedSite, setFeedSite] = useState(null);
   const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
+  const [spotlight, setSpotlight] = useState('s26'); // product on the spotlight KPI
 
   const posts = social && Array.isArray(social.posts) ? social.posts : [];
   const socialSites = (social && social.sites) || [];
@@ -1585,6 +1602,16 @@ function SocialView({ social }) {
       .map((v) => ({ id: v.id, name: v.name, ...bySite[v.id] }))
       .sort((a, b) => b.samsung / b.total - a.samsung / a.total || b.samsung - a.samsung);
   }, [filtered, socialSites]);
+
+  // Post counts per spotlight product over the current selection.
+  const spotlightCounts = useMemo(() => {
+    const out = {};
+    for (const sp of SPOTLIGHT_PRODUCTS) out[sp.key] = 0;
+    for (const p of filtered) {
+      for (const sp of SPOTLIGHT_PRODUCTS) if (spotlightHit(sp, p)) out[sp.key]++;
+    }
+    return out;
+  }, [filtered]);
 
   const chartPosts = useMemo(
     () => (chartSites && chartSites.length ? filtered.filter((p) => chartSites.includes(p.site)) : filtered),
@@ -1728,9 +1755,25 @@ function SocialView({ social }) {
           </div>
         </div>
         <div className="vm-enter" style={{ ...T.stat, animationDelay: '90ms' }}>
-          <div style={T.statLabel}>Galaxy S26 posts</div>
-          <div style={T.statValue}>{kpis.s26}</div>
-          <div style={T.statSub}>posts specifically about the Galaxy S26 series</div>
+          <div style={T.statLabel}>Launch spotlight</div>
+          <div style={T.spotRow}>
+            {SPOTLIGHT_PRODUCTS.map((sp) => (
+              <button
+                key={sp.key}
+                className="vm-press"
+                style={{ ...T.spotChip, ...(spotlight === sp.key ? T.spotChipOn : {}) }}
+                onClick={() => setSpotlight(sp.key)}
+                title={`Count posts mentioning the ${sp.full}`}
+              >
+                {sp.label}
+              </button>
+            ))}
+          </div>
+          <div style={T.statValue}>{spotlightCounts[spotlight]}</div>
+          <div style={T.statSub}>
+            posts in this selection mentioning the{' '}
+            {(SPOTLIGHT_PRODUCTS.find((sp) => sp.key === spotlight) || {}).full}
+          </div>
         </div>
         <div className="vm-enter" style={{ ...T.stat, animationDelay: '135ms' }}>
           <div style={T.statLabel}>Loudest competitor</div>
@@ -2667,6 +2710,24 @@ const styles = {
     borderColor: 'rgba(13,148,136,0.35)',
     boxShadow: '0 0 0 1px rgba(13,148,136,0.12), 0 8px 24px -12px rgba(19,36,32,0.10)',
     cursor: 'pointer',
+  },
+  spotRow: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', margin: '8px 0 2px' },
+  spotChip: {
+    background: '#ffffff',
+    color: INK_2,
+    border: `1px solid ${LINE}`,
+    borderRadius: 6,
+    padding: '2px 8px',
+    fontSize: 10.5,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
+  },
+  spotChipOn: {
+    background: 'rgba(13,148,136,0.14)',
+    color: '#0f766e',
+    borderColor: 'rgba(13,148,136,0.45)',
   },
   bestPct: {
     fontFamily: MONO,
