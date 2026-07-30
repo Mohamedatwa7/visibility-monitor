@@ -1102,6 +1102,9 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
 function SiteDetail({ site, onBack }) {
   const T = styles;
   const [product, setProduct] = useState('all');
+  // Metric card flip: front = Samsung's share metric by metric, back = the
+  // competition brand leaderboards for the same placements.
+  const [flipped, setFlipped] = useState(false);
   const metrics = siteMetrics(site);
   const avg = avgShareOf(site);
   const dCounts = deviceCountsOf(site);
@@ -1147,9 +1150,22 @@ function SiteDetail({ site, onBack }) {
       </div>
 
       <div style={T.detailGrid}>
-        <div style={T.panel}>
-          <div style={T.panelTitle}>Samsung's share, metric by metric</div>
-          {metrics.map((m) =>
+        <div style={T.flipOuter}>
+          <div style={{ ...T.flipInner, transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+            {/* front: Samsung metrics */}
+            <div style={{ ...T.panel, ...T.flipFace, ...(flipped ? T.flipHidden : {}) }}>
+              <div style={T.panelTitle}>
+                Samsung's share, metric by metric
+                <button
+                  className="vm-press"
+                  style={{ ...T.chip, marginLeft: 'auto' }}
+                  onClick={() => setFlipped(true)}
+                  title="Flip to the Samsung vs rival brand breakdowns"
+                >
+                  Competition →
+                </button>
+              </div>
+              {metrics.map((m) =>
             m.pct == null && m.d == null ? null : (
               <div key={m.key} style={T.metricRow}>
                 <div style={T.metricTop}>
@@ -1177,7 +1193,46 @@ function SiteDetail({ site, onBack }) {
               </div>
             )
           )}
-          <TermChips searchShare={site.searchShare} />
+              <TermChips searchShare={site.searchShare} />
+            </div>
+
+            {/* back: competition brand leaderboards */}
+            <div style={{ ...T.panel, ...T.flipFace, ...T.flipBack, ...(flipped ? {} : T.flipHidden) }}>
+              <div style={T.panelTitle}>
+                Samsung vs rival brands
+                <button
+                  className="vm-press"
+                  style={{ ...T.chip, marginLeft: 'auto' }}
+                  onClick={() => setFlipped(false)}
+                  title="Back to Samsung's share metrics"
+                >
+                  ← Metrics
+                </button>
+              </div>
+              {!hasCompetition && (
+                <div style={T.empty}>
+                  No competition data captured yet — brand breakdowns appear after the next check.
+                </div>
+              )}
+              {hasCompetition ? (
+                <div>
+                  <div style={T.compHead}>Homepage placements</div>
+                  <BrandBoard title="Hero banners" data={c.hero} />
+                  <BrandBoard title="Promo cards" data={c.promo} />
+                  <BrandBoard title="Product tiles" data={c.tiles} />
+                  {c.search && <BrandBoard title="Search results" subtitle="common phone searches" data={c.search} />}
+                  {divisions.length > 0 && (
+                    <div>
+                      <div style={T.compHead}>Position by division</div>
+                      {divisions.map(([div, brands]) => (
+                        <DivisionLine key={div} label={DIVISION_LABELS[div] || div} brands={brands} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
 
         <div style={T.panel}>
@@ -1218,36 +1273,21 @@ function SiteDetail({ site, onBack }) {
         <AssetsSection site={site} productFilter={product} />
       </div>
 
-      <div style={{ ...T.panel, marginTop: 18 }}>
-        <div style={T.panelTitle}>Competition — Samsung vs rival brands</div>
-        {!hasCompetition && (
-          <div style={T.empty}>No competition data captured yet — brand breakdowns appear after the next check.</div>
-        )}
-        {hasCompetition ? (
+      {hasCompetition ? (
+        <div style={{ ...T.panel, marginTop: 18 }}>
+          <div style={T.panelTitle}>
+            Competition over time
+            <span style={T.panelSub}>brand leaderboards live on the flip side of the metrics card</span>
+          </div>
           <div style={T.compGrid}>
-            <div>
-              <div style={T.compHead}>Homepage placements</div>
-              <BrandBoard title="Hero banners" data={c.hero} />
-              <BrandBoard title="Promo cards" data={c.promo} />
-              <BrandBoard title="Product tiles" data={c.tiles} />
-              {c.search && <BrandBoard title="Search results" subtitle="common phone searches" data={c.search} />}
-              {divisions.length > 0 && (
-                <div>
-                  <div style={T.compHead}>Position by division</div>
-                  {divisions.map(([div, brands]) => (
-                    <DivisionLine key={div} label={DIVISION_LABELS[div] || div} brands={brands} />
-                  ))}
-                </div>
-              )}
-            </div>
             <div>
               {c.devices && <BrandBoard title="Device catalog" subtitle="first pages" data={c.devices} />}
               <CompetitionTrend site={site} field="placementBrands" title="Homepage placements" />
-              {c.devices && <CompetitionTrend site={site} field="catalogBrands" title="Device catalog" />}
             </div>
+            <div>{c.devices ? <CompetitionTrend site={site} field="catalogBrands" title="Device catalog" /> : null}</div>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2167,6 +2207,19 @@ function HomeView({ sites, social, goTo }) {
 
 /* ---------- root ---------- */
 
+// Hash routing (#/home, #/sites, #/sites/<id>, #/social, #/activity) so every
+// page has its own URL and the browser back button navigates within the app
+// instead of leaving it. Hash-based = no server rewrites needed anywhere.
+const VIEWS = ['home', 'sites', 'social', 'activity'];
+function parseHash() {
+  if (typeof window === 'undefined') return { view: 'home', site: null };
+  const h = (window.location.hash || '').replace(/^#\/?/, '');
+  const parts = h.split('/');
+  const view = VIEWS.includes(parts[0]) ? parts[0] : 'home';
+  const site = view === 'sites' && parts[1] ? decodeURIComponent(parts[1]) : null;
+  return { view, site };
+}
+
 export default function BannerMonitorDashboard() {
   const [sites, setSites] = useState([]);
   const [log, setLog] = useState([]);
@@ -2178,8 +2231,26 @@ export default function BannerMonitorDashboard() {
   const [error, setError] = useState(null);
   const [savedNote, setSavedNote] = useState('');
   const [runNote, setRunNote] = useState('');
-  const [view, setView] = useState('home'); // home | sites | social | activity
-  const [selectedSite, setSelectedSite] = useState(null);
+  const [view, setView] = useState(() => parseHash().view); // home | sites | social | activity
+  const [selectedSite, setSelectedSite] = useState(() => parseHash().site);
+
+  // Navigation writes the hash; the hashchange listener is the single place
+  // state updates, so browser back/forward and in-app clicks behave the same.
+  const navigate = useCallback((v, siteId) => {
+    const next = siteId ? `#/${v}/${encodeURIComponent(siteId)}` : `#/${v}`;
+    if (window.location.hash === next) return;
+    window.location.hash = next;
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => {
+      const h = parseHash();
+      setView(h.view);
+      setSelectedSite(h.site);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   const loadSites = useCallback(async () => {
     const data = await api('/api/sites');
@@ -2273,10 +2344,9 @@ export default function BannerMonitorDashboard() {
 
   const T = styles;
 
-  const goTo = (v, siteId) => {
-    setView(v);
-    setSelectedSite(v === 'sites' && siteId ? siteId : null);
-  };
+  const goTo = (v, siteId) => navigate(v, v === 'sites' && siteId ? siteId : undefined);
+  // Site selection routes through the hash too (null -> back to the table).
+  const routeSelectSite = (id) => navigate('sites', id || undefined);
 
   const NAV = [
     ['home', 'Home', IconHome],
@@ -2347,7 +2417,7 @@ export default function BannerMonitorDashboard() {
             sites={sites}
             deviceCounts={deviceCounts}
             selectedSite={selectedSite}
-            setSelectedSite={setSelectedSite}
+            setSelectedSite={routeSelectSite}
           />
         )}
         {view === 'social' && <SocialView social={social} />}
@@ -2903,6 +2973,25 @@ const styles = {
     whiteSpace: 'nowrap',
   },
   detailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 18 },
+
+  // Metric-card flip (front = metrics, back = competition leaderboards). The
+  // hidden face is absolutely positioned so the visible one drives the height.
+  flipOuter: { perspective: 1400 },
+  flipInner: {
+    position: 'relative',
+    transformStyle: 'preserve-3d',
+    transition: 'transform .55s cubic-bezier(.4,.1,.2,1)',
+    height: '100%',
+  },
+  flipFace: {
+    backfaceVisibility: 'hidden',
+    WebkitBackfaceVisibility: 'hidden',
+    boxSizing: 'border-box',
+    minHeight: 0,
+    height: '100%',
+  },
+  flipBack: { transform: 'rotateY(180deg)' },
+  flipHidden: { position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' },
 
   metricRow: { padding: '12px 0', borderTop: '1px solid rgba(19,36,32,0.07)', display: 'flex', flexDirection: 'column', gap: 7 },
   metricTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 },
