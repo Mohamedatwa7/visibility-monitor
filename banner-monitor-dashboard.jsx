@@ -946,6 +946,10 @@ function AssetsSection({ site, productFilter }) {
 
 function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
   const T = styles;
+  // Column sorting: click a metric header to sort by it (desc, click again
+  // for asc); null = the incoming default ranking (avg share).
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState('desc');
   // With a device family selected, the placement columns (hero/promo/tiles)
   // narrow to that family's share of each section. Shelf and search are
   // scraped as totals only, so they have no per-family breakdown.
@@ -992,6 +996,65 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
     ? `Average of ${famName}'s hero, promo and tile shares on this site`
     : 'Average of every Samsung share metric measured on this site (hero, promo, tiles, shelf, search)';
 
+  // Precompute every row's values so column sorting is just a comparator.
+  let rows = sites.map((s) => {
+    const dSel = famMode ? (deviceCounts[s.id] || {})[deviceFilter] : null;
+    const dimmed = famMode && !dSel;
+    let cells;
+    let avg;
+    if (famMode) {
+      const c = dSel || { hero: 0, promo: 0, tiles: 0 };
+      const pct = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : null);
+      const fam = {
+        hero: pct(c.hero, s.bannerTotal),
+        promo: pct(c.promo, s.promoTotal),
+        tiles: pct(c.tiles, s.tileTotal),
+        shelf: null,
+        search: null,
+      };
+      cells = COLS.map((col) => ({
+        key: col.key,
+        pct: fam[col.key],
+        dir: null,
+        na: col.key === 'shelf' || col.key === 'search',
+      }));
+      const vals = [fam.hero, fam.promo, fam.tiles].filter((v) => v != null);
+      avg = vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
+    } else {
+      cells = siteMetrics(s).map((m) => ({
+        key: m.key,
+        pct: m.pct,
+        dir: m.pct != null && m.wow != null ? Math.sign(Math.round((m.pct - m.wow) * 10)) : null,
+        na: false,
+      }));
+      avg = avgShareOf(s);
+    }
+    return { s, dSel, dimmed, cells, avg };
+  });
+
+  if (sortKey) {
+    const val = (r) => (sortKey === 'avg' ? r.avg : (r.cells.find((cl) => cl.key === sortKey) || {}).pct);
+    const mul = sortDir === 'asc' ? 1 : -1;
+    rows = rows.slice().sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1; // missing values always sink to the bottom
+      if (bv == null) return -1;
+      return (av - bv) * mul;
+    });
+  }
+
+  const clickSort = (key, na) => {
+    if (na) return;
+    if (sortKey === key) setSortDir(sortDir === 'desc' ? 'asc' : 'desc');
+    else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+  const sortMark = (key) => (sortKey === key ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '');
+
   return (
     <div style={T.tableWrap}>
       <table style={T.table}>
@@ -999,49 +1062,34 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
           <tr>
             <th style={{ ...T.th, width: 30 }}>#</th>
             <th style={{ ...T.th, textAlign: 'left' }}>Site</th>
-            <th style={{ ...T.th, textAlign: 'left', width: 180, cursor: 'help' }} title={avgTip}>
+            <th
+              className="vm-press"
+              style={{ ...T.th, textAlign: 'left', width: 180, cursor: 'pointer' }}
+              title={`${avgTip} — click to sort`}
+              onClick={() => clickSort('avg', false)}
+            >
               {famMode ? `Avg ${famName} share` : 'Avg Samsung share'}
+              {sortMark('avg')}
             </th>
-            {COLS.map((c) => (
-              <th key={c.key} style={{ ...T.th, cursor: 'help' }} title={c.tip}>
-                {c.label}
-              </th>
-            ))}
+            {COLS.map((c) => {
+              const na = famMode && (c.key === 'shelf' || c.key === 'search');
+              return (
+                <th
+                  key={c.key}
+                  className={na ? undefined : 'vm-press'}
+                  style={{ ...T.th, cursor: na ? 'help' : 'pointer' }}
+                  title={na ? c.tip : `${c.tip} — click to sort`}
+                  onClick={() => clickSort(c.key, na)}
+                >
+                  {c.label}
+                  {sortMark(c.key)}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
-          {sites.map((s, i) => {
-            const dSel = famMode ? (deviceCounts[s.id] || {})[deviceFilter] : null;
-            const dimmed = famMode && !dSel;
-            let cells;
-            let avg;
-            if (famMode) {
-              const c = dSel || { hero: 0, promo: 0, tiles: 0 };
-              const pct = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : null);
-              const fam = {
-                hero: pct(c.hero, s.bannerTotal),
-                promo: pct(c.promo, s.promoTotal),
-                tiles: pct(c.tiles, s.tileTotal),
-                shelf: null,
-                search: null,
-              };
-              cells = COLS.map((col) => ({
-                key: col.key,
-                pct: fam[col.key],
-                dir: null,
-                na: col.key === 'shelf' || col.key === 'search',
-              }));
-              const vals = [fam.hero, fam.promo, fam.tiles].filter((v) => v != null);
-              avg = vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
-            } else {
-              cells = siteMetrics(s).map((m) => ({
-                key: m.key,
-                pct: m.pct,
-                dir: m.pct != null && m.wow != null ? Math.sign(Math.round((m.pct - m.wow) * 10)) : null,
-                na: false,
-              }));
-              avg = avgShareOf(s);
-            }
+          {rows.map(({ s, dSel, dimmed, cells, avg }, i) => {
             return (
               <tr
                 key={s.id}
@@ -1102,10 +1150,10 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
 function SiteDetail({ site, onBack }) {
   const T = styles;
   const [product, setProduct] = useState('all');
-  // Card flips: the metrics card flips to the competition brand leaderboards;
-  // the trends card flips to the competition-over-time charts.
+  // One flip for the whole overview: both cards rotate together — metrics ->
+  // brand leaderboards, trends -> competition-over-time — so a single click
+  // shows the complete competition picture.
   const [flipped, setFlipped] = useState(false);
-  const [flippedTrend, setFlippedTrend] = useState(false);
   const metrics = siteMetrics(site);
   const avg = avgShareOf(site);
   const dCounts = deviceCountsOf(site);
@@ -1161,7 +1209,7 @@ function SiteDetail({ site, onBack }) {
                   className="vm-press"
                   style={{ ...T.chip, marginLeft: 'auto' }}
                   onClick={() => setFlipped(true)}
-                  title="Flip to the Samsung vs rival brand breakdowns"
+                  title="Flip both cards to the full competition analysis"
                 >
                   Competition →
                 </button>
@@ -1205,9 +1253,9 @@ function SiteDetail({ site, onBack }) {
                   className="vm-press"
                   style={{ ...T.chip, marginLeft: 'auto' }}
                   onClick={() => setFlipped(false)}
-                  title="Back to Samsung's share metrics"
+                  title="Flip both cards back to the Samsung overview"
                 >
-                  ← Metrics
+                  ← Overview
                 </button>
               </div>
               {!hasCompetition && (
@@ -1237,16 +1285,16 @@ function SiteDetail({ site, onBack }) {
         </div>
 
         <div style={T.flipOuter}>
-          <div style={{ ...T.flipInner, transform: flippedTrend ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+          <div style={{ ...T.flipInner, transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
             {/* front: Samsung trends + shelf positions */}
-            <div style={{ ...T.panel, ...T.flipFace, ...(flippedTrend ? T.flipHidden : {}) }}>
+            <div style={{ ...T.panel, ...T.flipFace, ...(flipped ? T.flipHidden : {}) }}>
               <div style={T.panelTitle}>
                 Trends & shelf positions
                 <button
                   className="vm-press"
                   style={{ ...T.chip, marginLeft: 'auto' }}
-                  onClick={() => setFlippedTrend(true)}
-                  title="Flip to the competition-over-time charts"
+                  onClick={() => setFlipped(true)}
+                  title="Flip both cards to the full competition analysis"
                 >
                   Competition →
                 </button>
@@ -1260,16 +1308,16 @@ function SiteDetail({ site, onBack }) {
             </div>
 
             {/* back: competition over time */}
-            <div style={{ ...T.panel, ...T.flipFace, ...T.flipBack, ...(flippedTrend ? {} : T.flipHidden) }}>
+            <div style={{ ...T.panel, ...T.flipFace, ...T.flipBack, ...(flipped ? {} : T.flipHidden) }}>
               <div style={T.panelTitle}>
                 Competition over time
                 <button
                   className="vm-press"
                   style={{ ...T.chip, marginLeft: 'auto' }}
-                  onClick={() => setFlippedTrend(false)}
-                  title="Back to Samsung's trends"
+                  onClick={() => setFlipped(false)}
+                  title="Flip both cards back to the Samsung overview"
                 >
-                  ← Trends
+                  ← Overview
                 </button>
               </div>
               {!hasCompetition && (
