@@ -1102,9 +1102,10 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
 function SiteDetail({ site, onBack }) {
   const T = styles;
   const [product, setProduct] = useState('all');
-  // Metric card flip: front = Samsung's share metric by metric, back = the
-  // competition brand leaderboards for the same placements.
+  // Card flips: the metrics card flips to the competition brand leaderboards;
+  // the trends card flips to the competition-over-time charts.
   const [flipped, setFlipped] = useState(false);
+  const [flippedTrend, setFlippedTrend] = useState(false);
   const metrics = siteMetrics(site);
   const avg = avgShareOf(site);
   const dCounts = deviceCountsOf(site);
@@ -1235,13 +1236,56 @@ function SiteDetail({ site, onBack }) {
           </div>
         </div>
 
-        <div style={T.panel}>
-          <TrendChart title="Samsung share over time (%)" history={site.history} />
-          {site.deviceShare && Array.isArray(site.deviceShare.positions) && site.deviceShare.positions.length > 0 && (
-            <div style={{ marginTop: 18 }}>
-              <ShelfPositions deviceShare={site.deviceShare} />
+        <div style={T.flipOuter}>
+          <div style={{ ...T.flipInner, transform: flippedTrend ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+            {/* front: Samsung trends + shelf positions */}
+            <div style={{ ...T.panel, ...T.flipFace, ...(flippedTrend ? T.flipHidden : {}) }}>
+              <div style={T.panelTitle}>
+                Trends & shelf positions
+                <button
+                  className="vm-press"
+                  style={{ ...T.chip, marginLeft: 'auto' }}
+                  onClick={() => setFlippedTrend(true)}
+                  title="Flip to the competition-over-time charts"
+                >
+                  Competition →
+                </button>
+              </div>
+              <TrendChart title="Samsung share over time (%)" history={site.history} />
+              {site.deviceShare && Array.isArray(site.deviceShare.positions) && site.deviceShare.positions.length > 0 && (
+                <div style={{ marginTop: 18 }}>
+                  <ShelfPositions deviceShare={site.deviceShare} />
+                </div>
+              )}
             </div>
-          )}
+
+            {/* back: competition over time */}
+            <div style={{ ...T.panel, ...T.flipFace, ...T.flipBack, ...(flippedTrend ? {} : T.flipHidden) }}>
+              <div style={T.panelTitle}>
+                Competition over time
+                <button
+                  className="vm-press"
+                  style={{ ...T.chip, marginLeft: 'auto' }}
+                  onClick={() => setFlippedTrend(false)}
+                  title="Back to Samsung's trends"
+                >
+                  ← Trends
+                </button>
+              </div>
+              {!hasCompetition && (
+                <div style={T.empty}>
+                  No competition data captured yet — brand trends appear after the next check.
+                </div>
+              )}
+              {hasCompetition ? (
+                <div>
+                  {c.devices && <BrandBoard title="Device catalog" subtitle="first pages" data={c.devices} />}
+                  <CompetitionTrend site={site} field="placementBrands" title="Homepage placements" />
+                  {c.devices && <CompetitionTrend site={site} field="catalogBrands" title="Device catalog" />}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1273,21 +1317,6 @@ function SiteDetail({ site, onBack }) {
         <AssetsSection site={site} productFilter={product} />
       </div>
 
-      {hasCompetition ? (
-        <div style={{ ...T.panel, marginTop: 18 }}>
-          <div style={T.panelTitle}>
-            Competition over time
-            <span style={T.panelSub}>brand leaderboards live on the flip side of the metrics card</span>
-          </div>
-          <div style={T.compGrid}>
-            <div>
-              {c.devices && <BrandBoard title="Device catalog" subtitle="first pages" data={c.devices} />}
-              <CompetitionTrend site={site} field="placementBrands" title="Homepage placements" />
-            </div>
-            <div>{c.devices ? <CompetitionTrend site={site} field="catalogBrands" title="Device catalog" /> : null}</div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
