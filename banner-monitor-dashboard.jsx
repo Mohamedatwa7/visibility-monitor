@@ -62,9 +62,8 @@ function fmtCount(n) {
   return n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n);
 }
 
-// 1 -> "first", 2 -> "2nd", 3 -> "3rd", 11 -> "11th"…
+// 1 -> "1st", 2 -> "2nd", 3 -> "3rd", 11 -> "11th"…
 function ordinal(n) {
-  if (n === 1) return 'first';
   const v = n % 100;
   const suffix = v >= 11 && v <= 13 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th';
   return `${n}${suffix}`;
@@ -247,12 +246,43 @@ function siteMetrics(s) {
   ];
 }
 
-// One number that answers "how is this site doing?".
-function avgShareOf(s) {
-  const vals = siteMetrics(s)
-    .map((m) => m.pct)
-    .filter((v) => v != null);
-  return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
+// Funnel weights for the visibility score — hero is the premium slot, search
+// carries the highest purchase intent. The score renormalizes over whichever
+// metrics a site actually has, so operator sites without shelf/search data
+// stay comparable.
+const SCORE_WEIGHTS = { hero: 30, search: 25, shelf: 20, promo: 15, tiles: 10 };
+const SCORE_TIP =
+  'Weighted visibility score: hero 30% (position-adjusted) · search 25% · shelf 20% · promo 15% · tiles 10% — renormalized over the metrics measured on this site';
+
+// Carousel rotation drop-off: the first slide gets most of the attention.
+// Runs recorded before positions existed count each banner in full.
+const slideFactor = (pos) => (pos == null ? 1 : pos === 1 ? 1 : pos === 2 ? 0.6 : 0.4);
+
+// Position-adjusted hero share: each Samsung slide is scaled by its slot's
+// attention factor before dividing by the carousel size.
+function heroAdjustedPct(s) {
+  const heroAssets = (s.assets && s.assets.hero) || [];
+  if (!s.bannerTotal || !heroAssets.length) return null;
+  const eff = heroAssets.reduce((sum, a) => sum + slideFactor(a.pos), 0);
+  return Math.round((eff / s.bannerTotal) * 1000) / 10;
+}
+
+// One number that answers "how is this site doing?" — the weighted score
+// (previously a plain average of the shares).
+function visibilityScore(s) {
+  let num = 0;
+  let den = 0;
+  for (const m of siteMetrics(s)) {
+    let v = m.pct;
+    if (m.key === 'hero') {
+      const adj = heroAdjustedPct(s);
+      if (adj != null) v = adj;
+    }
+    if (v == null) continue;
+    num += SCORE_WEIGHTS[m.key] * v;
+    den += SCORE_WEIGHTS[m.key];
+  }
+  return den ? Math.round((num / den) * 10) / 10 : null;
 }
 
 // Weighted aggregate share across sites (true share, not average of pcts).
@@ -1001,8 +1031,8 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
     },
   ];
   const avgTip = famMode
-    ? `Average of ${famName}'s hero, promo and tile shares on this site`
-    : 'Average of every Samsung share metric measured on this site (hero, promo, tiles, shelf, search)';
+    ? `Weighted ${famName} visibility: hero 30 · promo 15 · tiles 10, renormalized over the sections with data`
+    : SCORE_TIP;
 
   // Precompute every row's values so column sorting is just a comparator.
   let rows = sites.map((s) => {
@@ -1026,8 +1056,14 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
         dir: null,
         na: col.key === 'shelf' || col.key === 'search',
       }));
-      const vals = [fam.hero, fam.promo, fam.tiles].filter((v) => v != null);
-      avg = vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
+      let num = 0;
+      let den = 0;
+      for (const k of ['hero', 'promo', 'tiles']) {
+        if (fam[k] == null) continue;
+        num += SCORE_WEIGHTS[k] * fam[k];
+        den += SCORE_WEIGHTS[k];
+      }
+      avg = den ? Math.round((num / den) * 10) / 10 : null;
     } else {
       cells = siteMetrics(s).map((m) => ({
         key: m.key,
@@ -1035,7 +1071,7 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
         dir: m.pct != null && m.wow != null ? Math.sign(Math.round((m.pct - m.wow) * 10)) : null,
         na: false,
       }));
-      avg = avgShareOf(s);
+      avg = visibilityScore(s);
     }
     return { s, dSel, dimmed, cells, avg };
   });
@@ -1076,7 +1112,7 @@ function SiteTable({ sites, deviceFilter, deviceCounts, onOpen }) {
               title={`${avgTip} — click to sort`}
               onClick={() => clickSort('avg', false)}
             >
-              {famMode ? `Avg ${famName} share` : 'Avg Samsung share'}
+              {famMode ? `${famName} visibility score` : 'Visibility score'}
               {sortMark('avg')}
             </th>
             {COLS.map((c) => {
@@ -1163,7 +1199,7 @@ function SiteDetail({ site, onBack }) {
   // shows the complete competition picture.
   const [flipped, setFlipped] = useState(false);
   const metrics = siteMetrics(site);
-  const avg = avgShareOf(site);
+  const avg = visibilityScore(site);
   const dCounts = deviceCountsOf(site);
   const present = DEVICE_FAMILIES.filter((f) => dCounts[f.key]);
   // Where Samsung's hero banners sit in the carousel (1 = the slide shown
@@ -1207,9 +1243,9 @@ function SiteDetail({ site, onBack }) {
             </div>
           )}
         </div>
-        <div style={T.detailAvg} title="Average of the Samsung share metrics measured on this site">
+        <div style={T.detailAvg} title={SCORE_TIP}>
           <div style={T.detailAvgNum}>{avg == null ? '—' : `${avg}%`}</div>
-          <div style={T.detailAvgLabel}>avg Samsung share</div>
+          <div style={T.detailAvgLabel}>visibility score</div>
         </div>
       </div>
 
@@ -1258,9 +1294,9 @@ function SiteDetail({ site, onBack }) {
                   {m.key === 'hero' && heroSlots.length > 0 && (
                     <Tag
                       tone={heroSlots[0] === 1 ? 'green' : 'neutral'}
-                      title="Where Samsung's banners sit in the hero carousel — first means the slide visitors see before any rotation"
+                      title="Where Samsung's banners sit in the hero carousel — 1st is the slide visitors see before any rotation"
                     >
-                      carousel: {heroSlots.map(ordinal).join(' & ')}
+                      Hero banner position: {heroSlots.map(ordinal).join(' & ')}
                     </Tag>
                   )}
                   {m.key === 'shelf' && site.deviceShare && site.deviceShare.pages > 1 && (
@@ -1380,16 +1416,21 @@ function SitesView({ sites, deviceCounts, selectedSite, setSelectedSite }) {
 
   const visible = useMemo(() => {
     const famCount = (id) => ((deviceCounts[id] || {})[device] || {}).total || 0;
-    // The family's average placement share — the same number the Avg column
-    // shows in device-filter mode, so the ranking matches what's displayed.
+    // The family's weighted placement score — the same number the score
+    // column shows in device-filter mode, so the ranking matches the display.
     const famAvg = (s) => {
       const c = (deviceCounts[s.id] || {})[device];
       if (!c) return null;
       const pct = (n, d) => (d ? (n / d) * 100 : null);
-      const vals = [pct(c.hero, s.bannerTotal), pct(c.promo, s.promoTotal), pct(c.tiles, s.tileTotal)].filter(
-        (v) => v != null
-      );
-      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      const fam = { hero: pct(c.hero, s.bannerTotal), promo: pct(c.promo, s.promoTotal), tiles: pct(c.tiles, s.tileTotal) };
+      let num = 0;
+      let den = 0;
+      for (const k of ['hero', 'promo', 'tiles']) {
+        if (fam[k] == null) continue;
+        num += SCORE_WEIGHTS[k] * fam[k];
+        den += SCORE_WEIGHTS[k];
+      }
+      return den ? num / den : null;
     };
     const rank = (v) => (v == null ? -1 : v);
     return sites
@@ -1398,7 +1439,7 @@ function SitesView({ sites, deviceCounts, selectedSite, setSelectedSite }) {
         if (device !== 'all') {
           return rank(famAvg(b)) - rank(famAvg(a)) || famCount(b.id) - famCount(a.id);
         }
-        return rank(avgShareOf(b)) - rank(avgShareOf(a));
+        return rank(visibilityScore(b)) - rank(visibilityScore(a));
       });
   }, [sites, country, type, device, deviceCounts]);
 
@@ -1408,7 +1449,7 @@ function SitesView({ sites, deviceCounts, selectedSite, setSelectedSite }) {
   // Headline KPIs over the sites currently in view (country/type filters apply).
   const kpis = useMemo(() => {
     const ranked = visible
-      .map((s) => ({ s, avg: avgShareOf(s) }))
+      .map((s) => ({ s, avg: visibilityScore(s) }))
       .filter((r) => r.avg != null)
       .sort((a, b) => b.avg - a.avg);
     return {
@@ -1444,7 +1485,7 @@ function SitesView({ sites, deviceCounts, selectedSite, setSelectedSite }) {
       <h1 style={T.pageTitle}>Partner site visibility</h1>
       <p style={T.pageSub}>
         Samsung's share of hero banners, promo cards, product tiles, catalog shelf and search on each partner site.
-        Ranked by average share — click a site for the full breakdown.
+        Ranked by visibility score — click a site for the full breakdown, or a column header to sort by that metric.
       </p>
 
       {/* headline KPIs over the sites in view */}
@@ -1487,9 +1528,7 @@ function SitesView({ sites, deviceCounts, selectedSite, setSelectedSite }) {
             {kpis.best && <span style={T.bestPct}>{kpis.best.avg}%</span>}
           </div>
           <div style={T.statSub}>
-            {kpis.best
-              ? 'highest average Samsung share in this view — click to open'
-              : 'no measured sites in this view'}
+            {kpis.best ? 'highest visibility score in this view — click to open' : 'no measured sites in this view'}
           </div>
         </div>
       </div>
@@ -2152,7 +2191,7 @@ function HomeView({ sites, social, goTo }) {
   ];
 
   const ranked = sites
-    .map((s) => ({ s, avg: avgShareOf(s) }))
+    .map((s) => ({ s, avg: visibilityScore(s) }))
     .filter((r) => r.avg != null)
     .sort((a, b) => b.avg - a.avg);
   const best = ranked[0] || null;
