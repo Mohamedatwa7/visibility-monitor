@@ -262,8 +262,15 @@ function siteMetrics(s) {
 // metrics a site actually has, so operator sites without shelf/search data
 // stay comparable.
 const SCORE_WEIGHTS = { hero: 30, search: 25, shelf: 20, promo: 15, tiles: 10 };
+// The score combines two pillars with a weighted geometric mean (the HDI
+// construction): being loud in discovery can't fully compensate for being
+// invisible on the page itself, and vice versa.
+const PILLARS = {
+  onsite: { keys: ['hero', 'promo', 'tiles'], exp: 0.55 },
+  discovery: { keys: ['shelf', 'search'], exp: 0.45 },
+};
 const SCORE_TIP =
-  'Weighted visibility score: hero 30% (position-adjusted) · search 25% · shelf 20% · promo 15% · tiles 10% — renormalized over the metrics measured on this site';
+  'Visibility score: on-site presence (hero 30 · promo 15 · tiles 10, hero position-adjusted) and discovery (shelf 20 · search 25) combined as a weighted geometric mean — a strong score needs presence on BOTH pillars. Weights renormalize over the metrics measured on each site.';
 
 // Carousel rotation drop-off: the first slide gets most of the attention.
 // Runs recorded before positions existed count each banner in full.
@@ -278,22 +285,37 @@ function heroAdjustedPct(s) {
   return Math.round((eff / s.bannerTotal) * 1000) / 10;
 }
 
-// One number that answers "how is this site doing?" — the weighted score
-// (previously a plain average of the shares).
+// One number that answers "how is this site doing?".
 function visibilityScore(s) {
-  let num = 0;
-  let den = 0;
-  for (const m of siteMetrics(s)) {
-    let v = m.pct;
+  const metrics = siteMetrics(s);
+  const valueOf = (m) => {
     if (m.key === 'hero') {
       const adj = heroAdjustedPct(s);
-      if (adj != null) v = adj;
+      if (adj != null) return adj;
     }
-    if (v == null) continue;
-    num += SCORE_WEIGHTS[m.key] * v;
-    den += SCORE_WEIGHTS[m.key];
-  }
-  return den ? Math.round((num / den) * 10) / 10 : null;
+    return m.pct;
+  };
+  // Weighted average within one pillar, renormalized over measured metrics.
+  const pillar = (keys) => {
+    let num = 0;
+    let den = 0;
+    for (const m of metrics) {
+      if (!keys.includes(m.key)) continue;
+      const v = valueOf(m);
+      if (v == null) continue;
+      num += SCORE_WEIGHTS[m.key] * v;
+      den += SCORE_WEIGHTS[m.key];
+    }
+    return den ? num / den : null;
+  };
+  const onsite = pillar(PILLARS.onsite.keys);
+  const discovery = pillar(PILLARS.discovery.keys);
+  let score;
+  if (onsite == null && discovery == null) return null;
+  if (onsite == null) score = discovery;
+  else if (discovery == null) score = onsite;
+  else score = Math.pow(Math.max(onsite, 0), PILLARS.onsite.exp) * Math.pow(Math.max(discovery, 0), PILLARS.discovery.exp);
+  return Math.round(score * 10) / 10;
 }
 
 // Weighted aggregate share across sites (true share, not average of pcts).

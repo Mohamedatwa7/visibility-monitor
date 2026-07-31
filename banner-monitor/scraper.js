@@ -246,15 +246,29 @@ function collectCandidatesInPage({ containerSource, containerFlags }) {
     }
   });
 
+  // True document order — the Set was built in PASS order (all imgs, then all
+  // anchors…), which scrambled carousel positions. Sorting here lets the
+  // classifier assign slide numbers that match what a visitor sees.
+  const ordered = Array.from(els).sort((a, b) =>
+    a === b ? 0 : a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+  );
+  const scrollYNow = window.scrollY || window.pageYOffset || 0;
+  // Carousel clones (swiper/slick/owl loop mode duplicates slides) — they'd
+  // steal position 1 from the real first slide.
+  const CLONE_SEL = '.swiper-slide-duplicate, .slick-cloned, .owl-item.cloned, [class*="-clone" i]';
+
   const out = [];
-  els.forEach((el) => {
+  ordered.forEach((el, docIdx) => {
     const anchor = el.closest('a');
-    const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 0 };
+    const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
     const blockInfo = blockInfoFor(el);
     out.push({
       tag: el.tagName,
-      w: Math.max(Math.round(rect.width) || 0, blockInfo.w),
-      ownW: Math.round(rect.width) || 0,
+      w: Math.max((rect && Math.round(rect.width)) || 0, blockInfo.w),
+      ownW: (rect && Math.round(rect.width)) || 0,
+      top: rect ? Math.round(rect.top + scrollYNow) : null,
+      docIdx,
+      clone: !!(el.closest && el.closest(CLONE_SEL)),
       src: el.tagName === 'IMG' ? el.currentSrc || el.src || '' : '',
       srcset: el.getAttribute ? el.getAttribute('srcset') || '' : '',
       alt: el.getAttribute ? el.getAttribute('alt') || '' : '',
@@ -395,6 +409,7 @@ async function countSamsungBanners(site) {
     const byKey = new Map(); // key -> {src, alt, href, w, tile, samsung}
     for (const c of candidates) {
       if (c.inChrome) continue; // skip nav/header/footer/mega-menu
+      if (c.clone) continue; // carousel loop duplicates — the original slide is also in the DOM
       if (TRACKER_RE.test(c.src || '') || TRACKER_RE.test(c.href || '')) continue;
 
       // The candidate's own creative image (ignore icon/placeholder assets).
@@ -444,11 +459,16 @@ async function countSamsungBanners(site) {
         (site.matchBlockText && c.blockText ? c.blockText.slice(0, 100) : '') ||
         (text ? text.slice(0, 100) : '');
 
-      const rec = byKey.get(key) || { key, src: '', alt: '', href: '', w: 0, ownW: 0, tile: false, samsung: false, sig: '' };
+      const rec =
+        byKey.get(key) ||
+        { key, src: '', alt: '', href: '', w: 0, ownW: 0, top: null, docIdx: Infinity, tile: false, samsung: false, sig: '' };
       if (!rec.src && imageUrl) rec.src = imageUrl;
       if (!rec.href && c.href) rec.href = c.href;
       if (!rec.alt && label) rec.alt = label;
       rec.w = Math.max(rec.w, c.w || 0);
+      // Document position: topmost/first sighting wins (slide order).
+      if (c.top != null && (rec.top == null || c.top < rec.top)) rec.top = c.top;
+      if (c.docIdx != null && c.docIdx < rec.docIdx) rec.docIdx = c.docIdx;
       // The candidate element's own creative width (no block inflation) —
       // stops a small logo inside a full-width strip from reading as a hero.
       if (imageUrl) rec.ownW = Math.max(rec.ownW, c.ownW || 0);
@@ -464,8 +484,20 @@ async function countSamsungBanners(site) {
     // Hero = wide slide AND a substantial creative of its own (a 240px brand
     // logo inside a full-width strip is not "the big picture").
     const HERO_MIN_OWN_W = site.heroMinOwnWidth || 350;
-    const classOf = (r) =>
+    const widthClass = (r) =>
       r.tile ? 'tile' : r.w >= HERO_MIN_W && (r.ownW >= HERO_MIN_OWN_W || !r.src) ? 'hero' : 'promo';
+
+    // Hero means the TOP carousel band only. Full-width promo strips further
+    // down the page pass the width test too, so demote every "hero" that sits
+    // more than heroBandPx below the topmost one — those are promos.
+    const BAND = site.heroBandPx || 300;
+    const wideTops = recs.filter((r) => widthClass(r) === 'hero' && r.top != null).map((r) => r.top);
+    const bandTop = wideTops.length ? Math.min(...wideTops) : null;
+    const classOf = (r) => {
+      const c = widthClass(r);
+      if (c === 'hero' && bandTop != null && r.top != null && r.top > bandTop + BAND) return 'promo';
+      return c;
+    };
 
     // Competition analysis: classify every placement to a brand. The Samsung
     // flag stays authoritative for our own numbers (it uses per-site tuned
@@ -482,12 +514,13 @@ async function countSamsungBanners(site) {
     };
 
     const section = (cls) => {
-      const all = recs.filter((r) => classOf(r) === cls);
+      // Document order so pos matches what a visitor sees (slide 1 first).
+      const all = recs.filter((r) => classOf(r) === cls).sort((a, b) => a.docIdx - b.docIdx);
       if (process.env.DEBUG_SECTIONS) {
         console.log(`\n[debug] ${cls} placements (${all.length}):`);
         all.forEach((r, i) =>
           console.log(
-            `  ${i + 1}. samsung=${r.samsung} w=${r.w} ownW=${r.ownW} ${(r.src || r.href || '(none)').slice(0, 110)}`
+            `  ${i + 1}. samsung=${r.samsung} w=${r.w} ownW=${r.ownW} top=${r.top} ${(r.src || r.href || '(none)').slice(0, 100)}`
           )
         );
       }
