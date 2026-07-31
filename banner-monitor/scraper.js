@@ -497,7 +497,23 @@ async function countSamsungBanners(site) {
         .map((r, i) => ({ r, pos: i + 1 }))
         .filter((x) => x.r.samsung)
         .map(({ r, pos }) => ({ key: r.key, src: r.src, alt: r.alt, href: r.href, pos }));
-      return { count: matches.length, total: all.length, matches, brands: brandTally(all) };
+      // Competitor placements (branded, non-Samsung) with the same position
+      // info — powers the dashboard's competition pictures gallery. Capped so
+      // a tile-heavy page can't balloon the stored run row.
+      const rivals = all
+        .map((r, i) => ({ r, pos: i + 1 }))
+        .filter((x) => !x.r.samsung && x.r.brand && x.r.brand !== 'other')
+        .slice(0, 40)
+        .map(({ r, pos }) => ({
+          key: r.key,
+          src: r.src,
+          alt: r.alt,
+          href: r.href,
+          pos,
+          brand: r.brand,
+          division: r.division,
+        }));
+      return { count: matches.length, total: all.length, matches, rivals, brands: brandTally(all) };
     };
 
     // Division breakdown across ALL placements: division -> brand -> count.

@@ -148,6 +148,14 @@ async function runOnce(siteFilter) {
         }
       }
 
+      // Competitor placements with images, section-labeled — nested inside
+      // the competition JSON so no storage schema change is needed.
+      const rivalPlacements = [
+        ...(hero.rivals || []).map((m) => ({ ...m, section: 'hero' })),
+        ...(promo.rivals || []).map((m) => ({ ...m, section: 'promo' })),
+        ...(tiles.rivals || []).map((m) => ({ ...m, section: 'tile' })),
+      ];
+
       // Competition analysis: per-section brand breakdowns, division-level
       // head-to-heads, and catalog/search brand shares in one object.
       const competition = {
@@ -158,6 +166,7 @@ async function runOnce(siteFilter) {
         divisions,
         devices: deviceShare ? deviceShare.brands || null : null,
         search: searchShare ? searchShare.brands || null : null,
+        rivalPlacements,
       };
       const topRivals = {};
       for (const m of [hero.brands, promo.brands, tiles.brands, competition.devices, competition.search]) {

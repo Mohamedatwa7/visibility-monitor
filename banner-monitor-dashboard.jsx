@@ -124,6 +124,17 @@ const DIVISION_LABELS = {
   computing: 'Tablets & PCs',
 };
 
+// Samsung org codes for the division filter, in org order (MX / VD / DA).
+const DIVISION_CODES = {
+  mobile: 'MX · Smartphones',
+  wearable: 'MX · Wearables',
+  computing: 'MX · Tablets & PCs',
+  tv: 'VD · TV & AV',
+  audio: 'VD · Audio',
+  appliance: 'DA · Home Appliances',
+};
+const DIVISION_ORDER = ['mobile', 'wearable', 'computing', 'tv', 'audio', 'appliance'];
+
 function mergeBrandMaps(...maps) {
   const out = {};
   for (const m of maps) {
@@ -1198,6 +1209,11 @@ function SiteDetail({ site, onBack }) {
   // brand leaderboards, trends -> competition-over-time — so a single click
   // shows the complete competition picture.
   const [flipped, setFlipped] = useState(false);
+  // Captured-placements flip (Samsung pictures <-> competitor pictures) and
+  // the competitor gallery's company/division filters.
+  const [assetsFlipped, setAssetsFlipped] = useState(false);
+  const [rivalBrand, setRivalBrand] = useState('all');
+  const [rivalDivision, setRivalDivision] = useState('all');
   const metrics = siteMetrics(site);
   const avg = visibilityScore(site);
   const dCounts = deviceCountsOf(site);
@@ -1210,6 +1226,17 @@ function SiteDetail({ site, onBack }) {
     .filter((n) => n != null)
     .sort((a, b) => a - b);
   const c = site.competition || {};
+  // Competitor placements with images (recorded from the next check onward).
+  const rivalPlacements = Array.isArray(c.rivalPlacements) ? c.rivalPlacements : [];
+  const rivalBrandOptions = Array.from(new Set(rivalPlacements.map((p) => p.brand))).sort((a, b) =>
+    brandMeta(a).label.localeCompare(brandMeta(b).label)
+  );
+  const rivalDivOptions = DIVISION_ORDER.filter((d) => rivalPlacements.some((p) => p.division === d));
+  const rivalFiltered = rivalPlacements.filter(
+    (p) =>
+      (rivalBrand === 'all' || p.brand === rivalBrand) &&
+      (rivalDivision === 'all' || p.division === rivalDivision)
+  );
   const placements = mergeBrandMaps(c.hero, c.promo, c.tiles);
   const divisions = Object.entries(c.divisions || {}).filter(([, brands]) => Object.keys(brands).length >= 2);
   const hasCompetition =
@@ -1297,6 +1324,7 @@ function SiteDetail({ site, onBack }) {
                       title="Where Samsung's banners sit in the hero carousel — 1st is the slide visitors see before any rotation"
                     >
                       Hero banner position: {heroSlots.map(ordinal).join(' & ')}
+                      {site.bannerTotal ? ` of ${site.bannerTotal}` : ''}
                     </Tag>
                   )}
                   {m.key === 'shelf' && site.deviceShare && site.deviceShare.pages > 1 && (
@@ -1374,32 +1402,134 @@ function SiteDetail({ site, onBack }) {
         </div>
       </div>
 
-      {/* placements gallery with a product filter (names only) */}
-      <div style={{ ...T.panel, marginTop: 18 }}>
-        <div style={{ ...T.panelTitle, marginBottom: 10 }}>Captured placements</div>
-        {present.length > 0 && (
-          <div style={T.productRow}>
-            <span style={T.filterLabel}>Product</span>
-            <button
-              className="vm-press"
-              style={{ ...T.chip, ...(product === 'all' ? T.chipOn : {}) }}
-              onClick={() => setProduct('all')}
-            >
-              All
-            </button>
-            {present.map((f) => (
+      {/* placements gallery: front = Samsung (product filter), back = the
+          competitors' pictures with company + division dropdowns */}
+      <div style={{ ...T.flipOuter, marginTop: 18 }}>
+        <div style={{ ...T.flipInner, transform: assetsFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+          {/* front: Samsung placements */}
+          <div style={{ ...T.panel, ...T.flipFace, ...(assetsFlipped ? T.flipHidden : {}) }}>
+            <div style={{ ...T.panelTitle, marginBottom: 10 }}>
+              Captured placements — Samsung
               <button
-                key={f.key}
                 className="vm-press"
-                style={{ ...T.chip, ...(product === f.key ? T.chipOn : {}) }}
-                onClick={() => setProduct(product === f.key ? 'all' : f.key)}
+                style={{ ...T.chip, marginLeft: 'auto' }}
+                onClick={() => setAssetsFlipped(true)}
+                title="Flip to the competitors' captured placements"
               >
-                {f.label}
+                Competition →
               </button>
-            ))}
+            </div>
+            {present.length > 0 && (
+              <div style={T.productRow}>
+                <span style={T.filterLabel}>Product</span>
+                <button
+                  className="vm-press"
+                  style={{ ...T.chip, ...(product === 'all' ? T.chipOn : {}) }}
+                  onClick={() => setProduct('all')}
+                >
+                  All
+                </button>
+                {present.map((f) => (
+                  <button
+                    key={f.key}
+                    className="vm-press"
+                    style={{ ...T.chip, ...(product === f.key ? T.chipOn : {}) }}
+                    onClick={() => setProduct(product === f.key ? 'all' : f.key)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <AssetsSection site={site} productFilter={product} />
           </div>
-        )}
-        <AssetsSection site={site} productFilter={product} />
+
+          {/* back: competitor placements */}
+          <div style={{ ...T.panel, ...T.flipFace, ...T.flipBack, ...(assetsFlipped ? {} : T.flipHidden) }}>
+            <div style={{ ...T.panelTitle, marginBottom: 10 }}>
+              Captured placements — competition
+              <button
+                className="vm-press"
+                style={{ ...T.chip, marginLeft: 'auto' }}
+                onClick={() => setAssetsFlipped(false)}
+                title="Back to Samsung's captured placements"
+              >
+                ← Samsung
+              </button>
+            </div>
+            <div style={T.productRow}>
+              <span style={T.filterLabel}>Company</span>
+              <select style={T.select} value={rivalBrand} onChange={(e) => setRivalBrand(e.target.value)}>
+                <option value="all">All companies</option>
+                {rivalBrandOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {brandMeta(b).label}
+                  </option>
+                ))}
+              </select>
+              <span style={{ ...T.filterLabel, marginLeft: 10 }}>Division</span>
+              <select style={T.select} value={rivalDivision} onChange={(e) => setRivalDivision(e.target.value)}>
+                <option value="all">All divisions</option>
+                {rivalDivOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {DIVISION_CODES[d] || d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {[
+              ['hero', 'Hero banners'],
+              ['promo', 'Promo cards'],
+              ['tile', 'Product tiles'],
+            ].map(([sec, secTitle]) => {
+              const items = rivalFiltered.filter((p) => p.section === sec);
+              if (!items.length) return null;
+              return (
+                <div key={sec} style={{ marginBottom: 16 }}>
+                  <div style={T.blockHead}>
+                    <span style={T.blockTitle}>
+                      {secTitle} <span style={{ color: AXIS_TEXT, fontWeight: 500 }}>({items.length})</span>
+                    </span>
+                  </div>
+                  <div style={T.assetGrid}>
+                    {items.map((a, i) => (
+                      <a
+                        key={i}
+                        href={a.href || a.src || '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={T.assetCard}
+                        title={a.alt || a.href || a.src}
+                      >
+                        {a.src ? (
+                          <img src={a.src} alt={a.alt || ''} style={T.assetImg} loading="lazy" />
+                        ) : (
+                          <div style={T.assetNoImg}>link-only placement</div>
+                        )}
+                        <div style={T.assetBrandRow}>
+                          <i style={{ ...T.dot, background: brandMeta(a.brand).color }} /> {brandMeta(a.brand).label}
+                          {a.division && a.division !== 'other' && DIVISION_CODES[a.division]
+                            ? ` · ${DIVISION_CODES[a.division].split(' ·')[0]}`
+                            : ''}
+                        </div>
+                        <div style={T.assetLabel}>
+                          {a.alt || (a.href || a.src || '').split('/').filter(Boolean).pop()}
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {rivalFiltered.length === 0 && (
+              <div style={T.empty}>
+                {rivalPlacements.length === 0
+                  ? 'Competitor placement images appear after the next daily check.'
+                  : 'No competitor placements match these filters.'}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
     </div>
@@ -3001,6 +3131,25 @@ const styles = {
   },
   pickerRow: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingBottom: 10, marginBottom: 4 },
   productRow: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 16 },
+  select: {
+    background: '#ffffff',
+    color: INK,
+    border: `1px solid ${LINE}`,
+    borderRadius: 8,
+    padding: '5px 10px',
+    fontSize: 12.5,
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+  },
+  assetBrandRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 5,
+    fontSize: 10.5,
+    fontWeight: 700,
+    color: INK,
+  },
 
   /* table */
   tableWrap: { ...glass, marginTop: 14, overflowX: 'auto' },
