@@ -390,9 +390,16 @@ async function measureSearchShare(site) {
         results.push({ term, error: err.message });
       }
     }
-    if (!results.some((r) => !r.error)) {
+    // Partial WAF blocks poison the aggregate: when most terms fail
+    // (Cloudflare challenging the run), the lone survivor is usually
+    // challenge-degraded too — Emax stored a bogus 0% search share this way.
+    // Require a MAJORITY of terms; otherwise fail the whole measurement so
+    // the run keeps the previous value as null rather than storing garbage.
+    const okTerms = results.filter((r) => !r.error);
+    if (okTerms.length < Math.ceil(results.length / 2)) {
+      const firstErr = (results.find((r) => r.error) || {}).error || 'unknown';
       throw new ShareParseError(
-        `all ${results.length} search term(s) failed (first: ${results[0].error})`
+        `only ${okTerms.length} of ${results.length} search term(s) succeeded (first error: ${firstErr})`
       );
     }
     return aggregateTerms('grid', results, cfg.note);

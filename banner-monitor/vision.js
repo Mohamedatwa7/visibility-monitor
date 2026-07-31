@@ -226,9 +226,13 @@ async function classifyHeroSlides(site, slides) {
     type: 'text',
     text:
       `These are the hero-carousel slides of ${site.name} (${site.url}), a Gulf retail/telecom site. ` +
-      `Judge each slide from its artwork alone: does it feature Samsung products or Samsung branding? ` +
-      `Count multi-brand offers that visibly include Samsung devices or the Samsung logo as samsung=true. ` +
-      `Also name the dominant brand of each slide. Return one entry per slide, keyed by the SLIDE numbers above.`,
+      `Judge each slide from its artwork alone. samsung=true ONLY when the slide is a DEDICATED, official ` +
+      `Samsung advertisement — a Samsung product or Samsung campaign is the slide's main subject (a Galaxy ` +
+      `device hero shot, a Samsung launch/pre-order creative, Samsung as the featured brand). ` +
+      `Multi-brand or category offers (e.g. "10% off tablets", a TV-category sale) that merely include a ` +
+      `Samsung device or the Samsung logo among other brands are NOT samsung=true — set samsung=false and ` +
+      `report the slide's dominant brand (or "other" for mixed/category slides). ` +
+      `Return one entry per slide, keyed by the SLIDE numbers above.`,
   });
 
   const response = await client.messages.create({
