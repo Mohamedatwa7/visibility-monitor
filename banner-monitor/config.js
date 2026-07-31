@@ -266,6 +266,10 @@ const SITES = [
     // the hero image's lower half - caption text there is NOT slide evidence
     // and was mis-branding every cycled slide. URL/alt/href evidence only.
     heroNoCaption: true,
+    // Amazon has no carousel block classes, so the anchor+image merge never
+    // fires and every card counted twice (tiles read ~2x, e.g. 0/214).
+    // Dedupe by destination: one record per /dp/<asin> or deal link.
+    bannerDedupe: 'href',
     // Amazon has no browsable phones shelf â€” the smartphones search grid IS
     // its shelf. Cards: [data-component-type=s-search-result] (48/page,
     // sponsored included); brand from card text + /dp/ slugs. Next button

@@ -612,6 +612,56 @@ function clickHeroControlInPage({ mode, sel, index, bandBottom }) {
   return true;
 }
 
+// Slide identity shared by the passive watcher and the click-cycle.
+const slideSig = (s) => (s.url ? `${s.url}|${s.href || ''}` : `cap:${(s.caption || '').slice(0, 80)}`);
+
+// PASSIVE rotation watch — the primary observation. From the moment the page
+// is usable, sample the active hero and record each slide as autoplay shows
+// it. This yields the TRUE visitor order (position 1 = first thing shown) and
+// the true slide set: click-cycling on top of fast autoplay can starve
+// individual slides of a stable capture window and drop them entirely
+// (Xcite's 17-slide rotation lost 4 slides, including both Samsung ones).
+// Stops on wrap-around (an already-recorded slide reappears), or after 15s
+// with nothing new (static hero / no autoplay), or at the 75s cap.
+async function watchHeroRotation(page, site) {
+  const CAP = { bandBottom: HERO_BAND_PX, noCaption: !!(site && site.heroNoCaption) };
+  const states = [];
+  const seenKeys = new Set();
+  let prevKey = '';
+  let confirmed = '';
+  let sameCount = 0;
+  const t0 = Date.now();
+  let lastNewAt = Date.now();
+  while (Date.now() - t0 < 75000) {
+    let st = null;
+    try {
+      st = await page.evaluate(captureActiveHeroInPage, CAP);
+    } catch {
+      /* page still hydrating */
+    }
+    if (st && st.url) {
+      const k = slideSig(st);
+      sameCount = k === prevKey ? sameCount + 1 : 1;
+      prevKey = k;
+      // Two consecutive agreeing samples = a settled slide, not a mid-fade
+      // frame pairing the wrong image with the wrong link.
+      if (sameCount >= 2 && k !== confirmed) {
+        confirmed = k;
+        if (seenKeys.has(k)) {
+          if (states.length > 1) break; // wrapped around — rotation complete
+        } else {
+          seenKeys.add(k);
+          states.push(st);
+          lastNewAt = Date.now();
+        }
+      }
+    }
+    if (Date.now() - lastNewAt > 15000) break;
+    await page.waitForTimeout(700);
+  }
+  return states.length ? states : null;
+}
+
 // Node-side driver: cycle the hero carousel and return one record per slide,
 // in visual order. Returns null when no carousel control is found — caller
 // falls back to the static classification.
@@ -682,7 +732,9 @@ async function cycleHeroSlides(page, site, anchorHero) {
     }
     // Observation starts wherever autoplay happens to be, but the cyclic
     // order is preserved — rotate so the anchor slide (active at page load,
-    // i.e. the visitor's slide 1) leads and positions read true.
+    // i.e. the visitor's slide 1) leads and positions read true. This is a
+    // FALLBACK: the caller re-rotates to DOM order when it can (the anchor
+    // can itself be late — autoplay advances during the networkidle wait).
     if (anchorHero && anchorHero.url && states.length > 1) {
       const idx = states.findIndex((s) => s.url === anchorHero.url);
       if (idx > 0) {
@@ -692,7 +744,9 @@ async function cycleHeroSlides(page, site, anchorHero) {
       }
     }
   }
-  return states.length ? states : null;
+  if (!states.length) return null;
+  states.mode = control.mode; // 'dot' order is already true; 'next' order is rotation-relative
+  return states;
 }
 
 // Many Gulf telecom sites sit behind WAFs (F5 BIG-IP, Imperva) that serve a
@@ -778,21 +832,42 @@ async function countSamsungBanners(site) {
   try {
     const page = await context.newPage();
 
-    await gotoWithRetry(page, site.url, BROWSER.navTimeoutMs);
-    await dismissConsent(page, site);
-    await detectBlock(page); // throws BlockedError -> recorded as error, not 0
-
-    // On load a carousel sits on slide 1, and autoplay only advances after a
-    // few seconds — capture the active hero NOW so next-arrow cycling (which
-    // starts wherever autoplay happens to be by then) can rotate its observed
-    // order back to the visitor's true slide order.
-    let anchorHero = null;
+    // Fast-first navigation: the passive rotation watch must start as close
+    // to first paint as possible — autoplay advances within seconds, and
+    // waiting for networkidle costs the opening slides and shifts every
+    // position (Xcite read [1,3] for slides a visitor sees at [2,4]). Late
+    // content is handled afterwards by a second consent pass + autoScroll.
     try {
-      anchorHero = await page.evaluate(captureActiveHeroInPage, { bandBottom: HERO_BAND_PX, noCaption: true });
+      await page.goto(site.url, { waitUntil: 'domcontentloaded', timeout: BROWSER.navTimeoutMs });
     } catch {
-      /* anchor is best-effort */
+      await gotoWithRetry(page, site.url, BROWSER.navTimeoutMs);
+    }
+    await dismissConsent(page, site);
+    try {
+      await detectBlock(page); // throws BlockedError -> recorded as error, not 0
+    } catch (err) {
+      if (!(err instanceof BlockedError)) throw err;
+      // Managed challenges (Cloudflare) can auto-clear seconds after DCL —
+      // recheck once before giving up on the run.
+      await page.waitForTimeout(9000);
+      await detectBlock(page);
     }
 
+    // PRIMARY hero observation: watch the rotation passively from the moment
+    // the page is usable — true visitor order (slide 1 first) and, for
+    // autoplay carousels, the true slide set. The click-cycle below only
+    // supplements what this missed.
+    let passiveStates = null;
+    try {
+      passiveStates = await watchHeroRotation(page, site);
+    } catch {
+      /* passive watch is best-effort */
+    }
+    const anchorHero = passiveStates && passiveStates.length ? passiveStates[0] : null;
+
+    // Consent overlays that mount late (after DCL) get a second chance here
+    // before the scroll/screenshot phases.
+    await dismissConsent(page, site);
     await autoScroll(page);
 
     const candidates = await page.evaluate(collectCandidatesInPage, {
@@ -810,6 +885,23 @@ async function countSamsungBanners(site) {
       heroSlides = await cycleHeroSlides(page, site, anchorHero);
     } catch (err) {
       console.warn(`[scraper] hero cycle failed for ${site.id}: ${err.message}`);
+    }
+
+    // Merge the two observations. Dot-cycling keeps its own deterministic
+    // order (dot N = slide N). Otherwise the passive from-load order leads —
+    // it IS what a visitor sees — and the click-cycle only appends slides the
+    // rotation window missed (their exact slots are unknowable; they land at
+    // the tail).
+    if (passiveStates && passiveStates.length > 1 && (!heroSlides || heroSlides.mode !== 'dot')) {
+      const merged = [...passiveStates];
+      const keys = new Set(passiveStates.map(slideSig));
+      for (const s of heroSlides || []) {
+        if (keys.has(slideSig(s))) continue;
+        keys.add(slideSig(s));
+        merged.push(s);
+      }
+      merged.mode = 'passive'; // order is already true — no DOM re-rotation
+      heroSlides = merged;
     }
 
     // ---- Match + dedupe in Node ----
@@ -1011,6 +1103,38 @@ async function countSamsungBanners(site) {
         division: divisionOf(sig),
       };
     });
+    // True slide order for next-arrow carousels: observation starts wherever
+    // autoplay happens to be, and even the load-time anchor can be late
+    // (autoplay advances during the networkidle wait). The DOM is the ground
+    // truth — carousels mount slide 1 first in document order, and the static
+    // candidate pass recorded every slide's anchor/creative with its docIdx.
+    // Rotate the observed cycle so the DOM-first slide leads. (Dot mode needs
+    // none of this: dot order is already the visual order.)
+    if (heroSlides && heroSlides.mode === 'next' && slideRecs.length > 1) {
+      const slideIdxFor = (r) => {
+        const src = r.src ? normalizeUrl(r.src, true) : '';
+        const href = r.href ? normalizeUrl(r.href) : '';
+        return slideRecs.findIndex(
+          (s) =>
+            (src && s.src && normalizeUrl(s.src, true) === src) ||
+            (href && s.href && normalizeUrl(s.href) === href)
+        );
+      };
+      let lead = -1;
+      for (const r of [...recs].sort((a, b) => a.docIdx - b.docIdx)) {
+        const i = slideIdxFor(r);
+        if (i >= 0) {
+          lead = i;
+          break;
+        }
+      }
+      if (lead > 0) {
+        const rotated = slideRecs.slice(lead).concat(slideRecs.slice(0, lead));
+        rotated.forEach((s, i) => (s.pos = i + 1));
+        slideRecs.length = 0;
+        slideRecs.push(...rotated);
+      }
+    }
     // Cycled slides replace the static hero classification only when the
     // cycle plausibly covered the carousel: 2+ slides observed, or the static
     // pass itself saw at most 1 hero. A partial cycle (1 slide) must not
@@ -1119,13 +1243,22 @@ async function countSamsungBanners(site) {
       divisions[r.division][r.brand] = (divisions[r.division][r.brand] || 0) + 1;
     }
 
-    return {
+    const result = {
       hero: heroOverride ? heroFromSlides() : section('hero'),
       promo: section('promo'),
       tiles: section('tile'),
       divisions,
       screenshotPath,
     };
+    // A retail/telecom homepage NEVER legitimately renders zero placements
+    // across every section — that is a blank render, an app crash, or a
+    // bot-wall BLOCK_RE didn't recognize. Recording it as a run would zero
+    // the dashboard (and null section totals silently drop the on-site
+    // pillar from the visibility score, inflating the site's rank).
+    if (result.hero.total + result.promo.total + result.tiles.total === 0) {
+      throw new BlockedError('page rendered zero placements — blank render or unrecognized bot wall');
+    }
+    return result;
   } finally {
     await context.close().catch(() => {});
     await browser.close().catch(() => {});
