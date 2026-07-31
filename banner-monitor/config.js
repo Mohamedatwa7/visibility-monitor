@@ -13,7 +13,16 @@
 
 // Default detection. Matches Samsung brand + current flagship device families.
 // Tune per-site below when a partner uses different copy (e.g. localized names).
-const DEFAULT_REGEX = /samsung|galaxy|z\s?flip|z\s?fold/i;
+// fold/flip need a digit or a joined flip+fold campaign form ("Fold8",
+// "preorderflipandfold2026") — bare "fold"/"flip" would false-positive.
+// "new shape (unfolds)" / "galaxy unpacked" are the FF8 campaign taglines —
+// partners run brand-anonymous hero creatives with only that copy (du).
+// "watch9 ultra2" is the Galaxy Watch9 / Watch Ultra 2 pairing launched with
+// the Z Fold8 (e& runs it as a brand-anonymous hero creative; Sharaf DG's own
+// asset is Samsung_Watch9_Ultra2) — the pairing is distinctive enough to be
+// Samsung; bare "watch" obviously is not.
+const DEFAULT_REGEX =
+  /samsung|galaxy|z\s?flip|z\s?fold|fold\s?\d|flip\s?\d|flip\s?(?:and|&|\+|n)?\s?fold|fold\s?(?:and|&|\+|n)?\s?flip|new\s?shape|unpacked|watch\s?-?9[\s._-]*ultra\s?-?2/i;
 
 const SITES = [
   {
@@ -165,6 +174,10 @@ const SITES = [
     locale: 'en-OM',
     // NOTE: Omantel's cookie bar has "agree"-style LINKS to its terms pages â€”
     // the global consent-dismisser skips navigating anchors because of this.
+    // Device-shelf cards use generic image filenames for some creatives
+    // (320X320_0.png held a Galaxy S25 Edge card) - the card's own caption is
+    // the only brand signal, so match block text like du does.
+    matchBlockText: true,
     // Devices are sold via the XHAWI marketplace partner (Shopify): the
     // Omantel Store collection. Brand comes from /products/ slugs; the grid
     // grows via a Load More button (generic expandOnce handles it).
@@ -249,6 +262,10 @@ const SITES = [
     region: 'UAE',
     // Product detail pages: /dp/<asin>
     tileRegex: /\/dp\//i,
+    // Amazon overlays content cards (sponsored/deals, often rival brands) on
+    // the hero image's lower half - caption text there is NOT slide evidence
+    // and was mis-branding every cycled slide. URL/alt/href evidence only.
+    heroNoCaption: true,
     // Amazon has no browsable phones shelf â€” the smartphones search grid IS
     // its shelf. Cards: [data-component-type=s-search-result] (48/page,
     // sponsored included); brand from card text + /dp/ slugs. Next button

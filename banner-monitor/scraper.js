@@ -295,13 +295,402 @@ function collectCandidatesInPage({ containerSource, containerFlags }) {
   return out;
 }
 
+/* ------------------------------------------------------------------ *
+ * Hero carousel cycling.
+ *
+ * A static DOM snapshot cannot see what a hero carousel's NON-ACTIVE slides
+ * look like: hidden slides render at 0x0 (Vodafone, Omantel), and some sites
+ * only mount the active slide's caption at all (du's reskin). That made
+ * Samsung hero slides invisible to the width/signal classifier. So we drive
+ * the carousel like a visitor would — click each pagination dot (or the next
+ * arrow) and record what the slide shows while it is front-and-center. When a
+ * carousel control is found, the observed slides BECOME the hero section
+ * (slide order = dot order = what a visitor sees); otherwise the static
+ * width-based classification below stays authoritative.
+ * ------------------------------------------------------------------ */
+
+// Viewport band (page scrolled to top) that counts as "the hero area".
+const HERO_BAND_PX = 950;
+
+// Runs in-page: describe the currently ACTIVE hero slide — the largest
+// visible creative near the top plus the caption text overlaying it.
+// Accepts a number (band bottom px) or {bandBottom, noCaption}. noCaption
+// skips caption evidence for sites whose hero is overlaid by unrelated
+// content cards (Amazon) that would bleed rival-brand text into every slide.
+function captureActiveHeroInPage(opts) {
+  const bandBottom = typeof opts === 'number' ? opts : opts.bandBottom;
+  const noCaption = typeof opts === 'object' && !!opts.noCaption;
+  const chromeSel =
+    'header, nav, footer, [class*="mega" i], [class*="navbar" i], [class*="navigation" i], [id*="footer" i], [id*="header" i]';
+  const inChrome = (el) => !!(el.closest && el.closest(chromeSel));
+  // Includes ::before/::after — Omantel paints its hero creatives on a
+  // pseudo-element via a --bg-url custom property.
+  const bgUrl = (el) => {
+    const styles = [
+      el.style && el.style.backgroundImage,
+      getComputedStyle(el).backgroundImage,
+      getComputedStyle(el, '::before').backgroundImage,
+      getComputedStyle(el, '::after').backgroundImage,
+    ];
+    for (const s of styles) {
+      if (s && s !== 'none') {
+        const m = /url\((['"]?)(.*?)\1\)/i.exec(s);
+        if (m && m[2]) return m[2];
+      }
+    }
+    return '';
+  };
+  const ICON_RE =
+    /(\/svg-icons\/|\/icons\/|\bicon[-_]|chevron|arrow|sprite|favicon|\.svg(?:$|\?)|placeholder|[-_]gray\.(?:jpg|jpeg|png)|\bblank\.(?:gif|png)|\b1x1\.)/i;
+
+  // Effective visibility: stacked-slide carousels (du) keep every slide's
+  // image mounted at full size and fade the inactive ones to opacity 0 —
+  // only what a visitor can actually SEE right now counts.
+  const isShown = (el) => {
+    let cur = el;
+    for (let i = 0; i < 8 && cur && cur !== document.documentElement; i++) {
+      const cs = getComputedStyle(cur);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.4) return false;
+      cur = cur.parentElement;
+    }
+    return true;
+  };
+
+  // Prefer the creative covering the viewport's horizontal CENTER — in
+  // horizontal sliders the neighbor slides peek in from the edges, and a
+  // mid-transition capture could otherwise pick the outgoing slide.
+  const centerX = window.innerWidth / 2;
+  let best = null;
+  const consider = (el, url) => {
+    if (!url || ICON_RE.test(url)) return;
+    if (inChrome(el)) return;
+    const r = el.getBoundingClientRect();
+    if (r.width < 300 || r.height < 100) return;
+    if (r.bottom <= 0 || r.top >= bandBottom) return;
+    if (!isShown(el)) return;
+    const area = r.width * (Math.min(r.bottom, bandBottom) - Math.max(r.top, 0));
+    const centered = r.left <= centerX && r.right >= centerX ? 1 : 0;
+    if (best && (centered < best.centered || (centered === best.centered && area <= best.area))) return;
+    const a = el.closest('a');
+    best = {
+      area,
+      centered,
+      url,
+      rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
+      alt: (el.getAttribute && (el.getAttribute('alt') || el.getAttribute('aria-label'))) || '',
+      href: a ? a.href || '' : '',
+      w: Math.round(r.width),
+    };
+  };
+  document.querySelectorAll('img').forEach((i) => consider(i, i.currentSrc || i.src || ''));
+  document.querySelectorAll('video').forEach((v) => consider(v, v.currentSrc || v.src || v.getAttribute('poster') || 'video:inline'));
+  document.querySelectorAll('*').forEach((e) => {
+    const b = bgUrl(e);
+    if (b) consider(e, b);
+  });
+  if (!best) return null;
+
+  // Caption: visible text overlapping (or just under) the creative — that is
+  // the copy a visitor reads on this slide. Icon-font ligature names are text
+  // nodes too; strip them like blockTextFor does.
+  const clean = (s) =>
+    (s || '')
+      .replace(/\b(?:arrow|chevron|keyboard|navigate|expand)_\w+\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  // Only text whose CENTER sits on the creative (small tolerance below for
+  // under-image captions). Edge-overlap is not enough — the sticky nav bar
+  // overlaps the creative's top edge and nav menus contain brand names, which
+  // would false-flag every slide.
+  const box = best.rect;
+  const texts = [];
+  const seen = new Set();
+  let href = best.href;
+
+  // Slide-level overlay link: some carousels (Vodafone) keep the creative and
+  // a full-slide <a> as SIBLINGS, toggling the anchor's display in sync with
+  // the active slide. A visible anchor covering most of the creative's box is
+  // that slide's destination.
+  if (!href) {
+    const boxArea = Math.max(1, (box.right - box.left) * (box.bottom - box.top));
+    let overlayArea = 0;
+    document.querySelectorAll('a[href]').forEach((a) => {
+      if (inChrome(a) || !isShown(a)) return;
+      const r = a.getBoundingClientRect();
+      if (r.width > (box.right - box.left) * 1.4) return;
+      const ix = Math.max(0, Math.min(r.right, box.right) - Math.max(r.left, box.left));
+      const iy = Math.max(0, Math.min(r.bottom, box.bottom) - Math.max(r.top, box.top));
+      const inter = ix * iy;
+      if (inter >= boxArea * 0.5 && inter > overlayArea) {
+        overlayArea = inter;
+        href = a.href;
+      }
+    });
+  }
+  if (!noCaption) {
+    document.querySelectorAll('h1,h2,h3,h4,h5,p,span,a,button,li,div').forEach((el) => {
+      if (inChrome(el)) return;
+      // Only an element's OWN text nodes — wrapper divs would smuggle a whole
+      // nav bar's innerText into the caption.
+      const own = Array.from(el.childNodes)
+        .filter((n) => n.nodeType === 3)
+        .map((n) => n.textContent)
+        .join(' ');
+      const t = clean(own);
+      if (!t || t.length < 3 || seen.has(t)) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 30 || r.height < 10) return;
+      const cx = (r.left + r.right) / 2;
+      const cy = (r.top + r.bottom) / 2;
+      if (cy < box.top - 10 || cy > box.bottom + 60) return;
+      if (cx < box.left - 10 || cx > box.right + 10) return;
+      if (!isShown(el)) return;
+      seen.add(t);
+      texts.push(t);
+      if (!href) {
+        const a = el.closest('a');
+        if (a && a.href) href = a.href;
+      }
+    });
+  }
+  return {
+    url: best.url,
+    alt: best.alt,
+    href,
+    w: best.w,
+    caption: texts.join(' · ').slice(0, 400),
+  };
+}
+
+// Runs in-page: find the hero carousel's control. Prefers pagination dots
+// (their count IS the slide count and their order IS the visual order); falls
+// back to a next-arrow. Returns {mode:'dot',count} | {mode:'next'} | null.
+function detectHeroControlInPage(bandBottom) {
+  const chromeSel =
+    'header, nav, footer, [class*="mega" i], [class*="navbar" i], [class*="navigation" i], [id*="footer" i], [id*="header" i]';
+  // No minimum size: carousel arrows/dots are often 0x0 until hover (Vodafone
+  // ships its next-arrow as a hidden <img>) yet still respond to .click().
+  const usable = (el) => {
+    if (el.closest && el.closest(chromeSel)) return false;
+    const r = el.getBoundingClientRect();
+    return r.top >= -50 && r.top < bandBottom;
+  };
+  const DOT_SELS = [
+    '.swiper-pagination-bullet',
+    '.slick-dots li',
+    '.slick-dots button',
+    '.owl-dot',
+    '[class*="pagination" i] button',
+    '[class*="pagination" i] li',
+    '[class*="indicator" i] button',
+    '[class*="dots" i] button',
+    '[class*="dots" i] li',
+    '[role="tablist"] [role="tab"]',
+    '[class*="dot" i]',
+    // Generic fallback for utility-class markup (du): a row of >=3 tiny
+    // textless sibling buttons is a dot strip even without carousel classes.
+    '@generic',
+  ];
+  const dotGroup = (sel) => {
+    let els;
+    try {
+      els =
+        sel === '@generic'
+          ? Array.from(document.querySelectorAll('button, [role="button"], span, li')).filter(
+              (el) => {
+                const r = el.getBoundingClientRect();
+                return (
+                  r.width >= 4 &&
+                  r.width <= 30 &&
+                  r.height >= 4 &&
+                  r.height <= 30 &&
+                  !(el.innerText || '').trim() &&
+                  usable(el)
+                );
+              }
+            )
+          : Array.from(document.querySelectorAll(sel)).filter(usable);
+    } catch {
+      return null;
+    }
+    // Dots are same-parent siblings; small clickable markers.
+    const byParent = new Map();
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 80 || r.height > 80) continue;
+      const list = byParent.get(el.parentElement) || [];
+      list.push(el);
+      byParent.set(el.parentElement, list);
+    }
+    const min = sel === '@generic' ? 3 : 2;
+    for (const list of byParent.values()) {
+      if (list.length >= min && list.length <= 20) return list;
+    }
+    return null;
+  };
+  for (const sel of DOT_SELS) {
+    const list = dotGroup(sel);
+    if (list) return { mode: 'dot', count: list.length, sel };
+  }
+  const NEXT_SELS = [
+    '.swiper-button-next',
+    '.slick-next',
+    '.owl-next',
+    '[aria-label*="next" i]',
+    'button[class*="next" i]',
+    '[class*="carousel" i] [class*="next" i]',
+    'img[src*="next" i]',
+  ];
+  for (const sel of NEXT_SELS) {
+    let els;
+    try {
+      els = Array.from(document.querySelectorAll(sel)).filter(usable);
+    } catch {
+      continue;
+    }
+    if (els.length) return { mode: 'next', sel };
+  }
+  return null;
+}
+
+// Runs in-page: click the carousel control (dot #index, or the next arrow).
+function clickHeroControlInPage({ mode, sel, index, bandBottom }) {
+  const chromeSel =
+    'header, nav, footer, [class*="mega" i], [class*="navbar" i], [class*="navigation" i], [id*="footer" i], [id*="header" i]';
+  const usable = (el) => {
+    if (el.closest && el.closest(chromeSel)) return false;
+    const r = el.getBoundingClientRect();
+    return r.top >= -50 && r.top < bandBottom;
+  };
+  let els;
+  try {
+    els =
+      sel === '@generic'
+        ? Array.from(document.querySelectorAll('button, [role="button"], span, li')).filter((el) => {
+            const r = el.getBoundingClientRect();
+            return (
+              r.width >= 4 &&
+              r.width <= 30 &&
+              r.height >= 4 &&
+              r.height <= 30 &&
+              !(el.innerText || '').trim() &&
+              usable(el)
+            );
+          })
+        : Array.from(document.querySelectorAll(sel)).filter(usable);
+  } catch {
+    return false;
+  }
+  if (mode === 'dot') {
+    const byParent = new Map();
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 80 || r.height > 80) continue;
+      const list = byParent.get(el.parentElement) || [];
+      list.push(el);
+      byParent.set(el.parentElement, list);
+    }
+    const min = sel === '@generic' ? 3 : 2;
+    for (const list of byParent.values()) {
+      if (list.length >= min && list.length <= 20) {
+        if (index >= list.length) return false;
+        list[index].click();
+        return true;
+      }
+    }
+    return false;
+  }
+  const target = els[0];
+  if (!target) return false;
+  // An <img src="next.png"> arrow is not itself clickable — click its nearest
+  // clickable wrapper (or parent as a last resort), and dispatch the full
+  // mouse-event sequence since some frameworks listen on mousedown/up.
+  const t = target.closest('a,button,[role="button"]') || target.parentElement || target;
+  for (const type of ['mousedown', 'mouseup', 'click']) {
+    t.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+  }
+  return true;
+}
+
+// Node-side driver: cycle the hero carousel and return one record per slide,
+// in visual order. Returns null when no carousel control is found — caller
+// falls back to the static classification.
+async function cycleHeroSlides(page, site) {
+  const control = await page.evaluate(detectHeroControlInPage, HERO_BAND_PX);
+  if (!control) return null;
+  const CAP = { bandBottom: HERO_BAND_PX, noCaption: !!(site && site.heroNoCaption) };
+
+  // A capture only counts when it is STABLE: two reads ~350ms apart must
+  // agree on the creative AND the destination link. Mid-transition reads pair
+  // the outgoing slide's image with the incoming slide's overlay link
+  // (Vodafone), fabricating phantom slide combinations.
+  const stableCapture = async () => {
+    let prev = await page.evaluate(captureActiveHeroInPage, CAP);
+    for (let t = 0; t < 4; t++) {
+      await page.waitForTimeout(350);
+      const cur = await page.evaluate(captureActiveHeroInPage, CAP);
+      if (prev && cur && prev.url === cur.url && prev.href === cur.href) return cur;
+      prev = cur;
+    }
+    return null; // never stabilized — skip this state
+  };
+
+  // Slide identity = creative + destination. Captions are too volatile for
+  // identity (overlay text shifts between captures — Amazon double-counted a
+  // slide whose caption tail changed); they only identify creative-less states.
+  const sig = (s) => (s.url ? `${s.url}|${s.href || ''}` : `cap:${(s.caption || '').slice(0, 80)}`);
+  const states = [];
+  const seen = new Set();
+  const push = (st) => {
+    if (!st) return false;
+    const k = sig(st);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    states.push(st);
+    return true;
+  };
+
+  if (control.mode === 'dot') {
+    // Dot order = visual slide order, regardless of where autoplay happens
+    // to be when we start.
+    for (let i = 0; i < Math.min(control.count, 16); i++) {
+      const ok = await page.evaluate(clickHeroControlInPage, {
+        mode: 'dot',
+        sel: control.sel,
+        index: i,
+        bandBottom: HERO_BAND_PX,
+      });
+      if (!ok) break;
+      await page.waitForTimeout(900);
+      push(await stableCapture());
+    }
+  } else {
+    // No dots: advance with the next arrow. No early duplicate-based exit —
+    // when the arrow click doesn't register (Vodafone ships it as a bare
+    // <img> with the handler elsewhere) the carousel still AUTOPLAYS, and
+    // sampling the full window catches every slide of the rotation.
+    push(await stableCapture());
+    for (let i = 0; i < 24; i++) {
+      const ok = await page.evaluate(clickHeroControlInPage, {
+        mode: 'next',
+        sel: control.sel,
+        bandBottom: HERO_BAND_PX,
+      });
+      if (!ok) break;
+      await page.waitForTimeout(1300);
+      push(await stableCapture());
+    }
+  }
+  return states.length ? states : null;
+}
+
 // Many Gulf telecom sites sit behind WAFs (F5 BIG-IP, Imperva) that serve a
 // block/challenge page to obvious automation. Detect those so we report an
 // ERROR instead of silently recording "0 banners" (which would fire a bogus
 // "count dropped" alert). NOTE: this is best-effort — sophisticated JA3/TLS
 // fingerprinting can still block us and would need a real browser/proxy.
 const BLOCK_RE =
-  /request rejected|the requested url was rejected|has been blocked|access denied|attention required|verify you are (?:a )?human|verif(?:y|ies) (?:that )?you are (?:not )?a? ?(?:bot|human)|are you a robot|unusual traffic|pardon the interruption|performing security verification|security service to protect|checking your browser|just a moment/i;
+  /request rejected|the requested url was rejected|has been blocked|access denied|attention required|verify you are (?:a )?human|verif(?:y|ies) (?:that )?you are (?:not )?a? ?(?:bot|human)|are you a robot|unusual traffic|pardon the interruption|performing security verification|security service to protect|checking your browser|just a moment|application error|client-side exception/i;
 
 class BlockedError extends Error {
   constructor(msg) {
@@ -390,6 +779,16 @@ async function countSamsungBanners(site) {
 
     await page.screenshot({ path: screenshotPath, fullPage: true });
 
+    // Drive the hero carousel (if one exists) so hidden slides are observed
+    // the way a visitor sees them. Any failure falls back to the static
+    // width-based hero classification below.
+    let heroSlides = null;
+    try {
+      heroSlides = await cycleHeroSlides(page, site);
+    } catch (err) {
+      console.warn(`[scraper] hero cycle failed for ${site.id}: ${err.message}`);
+    }
+
     // ---- Match + dedupe in Node ----
     // Icons / UI chrome assets and slide pagination ("1 / 9") are not banners.
     // Lazy-load placeholders (Sharaf DG's SharafDG-gray.jpg, generic blank/1x1
@@ -403,7 +802,11 @@ async function countSamsungBanners(site) {
     // their query strings also poison brand detection (bing's "&lg=en-AE"
     // read as LG). Drop them before any classification.
     const TRACKER_RE =
-      /bat\.bing\.com|google-analytics|googletagmanager|doubleclick\.net|googleadservices|facebook\.com\/tr\b|connect\.facebook|hotjar|clarity\.ms|criteo|\/beacon|\/pixel\b|snr\.snapchat|tiktok\.com\/i18n|analytics\./i;
+      /bat\.bing\.com|google-analytics|googletagmanager|doubleclick\.net|googleadservices|facebook\.com\/tr\b|connect\.facebook|hotjar|clarity\.ms|criteo|\/beacon|\/pixel\b|snr\.snapchat|tiktok\.com\/i18n|analytics\.|\bt\.co\/|\badsct\b|adsrvr\.org|ib\.adnxs\.com|fls-eu\.amazon|\$uedata|freshbots|track\.omguk\.com/i;
+    // Store badges and social-profile chrome are page furniture, not promo
+    // placements — they inflate the section denominators on every site.
+    const CHROME_LINK_RE =
+      /app-?store-?badge|google-?play-?badge|play\.google\.com\/store|itunes\.apple\.com|apps\.apple\.com|appgallery|app-?gallery|instagram\.com\/[^/]|facebook\.com\/(?!tr\b)[^/]|twitter\.com\/[^/]|(?:^|\.)x\.com\/[^/]|youtube\.com\/(?:user|channel|@)|linkedin\.com\/company|api\.whatsapp\.com|wa\.me\/|snapchat\.com\/add|tiktok\.com\/@|^mailto:/i;
     const COUNTER_RE = /^\s*\d+\s*\/\s*\d+\s*$/;
 
     // Placements are classified into THREE sections (user-defined 2026-07-08):
@@ -421,6 +824,7 @@ async function countSamsungBanners(site) {
       if (c.inChrome) continue; // skip nav/header/footer/mega-menu
       if (c.clone) continue; // carousel loop duplicates — the original slide is also in the DOM
       if (TRACKER_RE.test(c.src || '') || TRACKER_RE.test(c.href || '')) continue;
+      if (CHROME_LINK_RE.test(c.src || '') || CHROME_LINK_RE.test(c.href || '')) continue;
 
       // The candidate's own creative image (ignore icon/placeholder assets).
       let imageUrl = c.src || c.bg || '';
@@ -566,9 +970,63 @@ async function countSamsungBanners(site) {
       return out;
     };
 
+    // Observed carousel slides (from cycling) replace the static hero
+    // classification when available — and the static hero-band records are
+    // dropped so the same carousel is not counted twice across sections.
+    const slideRecs = (heroSlides || []).map((s, i) => {
+      const isRealUrl = s.url && !/^video:/i.test(s.url);
+      const sig = [isRealUrl ? s.url : '', s.alt, s.href, s.caption].filter(Boolean).join(' ');
+      const samsung = regex.test(sig);
+      return {
+        key: (isRealUrl && normalizeUrl(s.url, site.bannerDedupe === 'image-query')) || normalizeUrl(s.href) || `slide#${i + 1}`,
+        src: isRealUrl ? s.url : '',
+        alt: s.alt || (s.caption || '').slice(0, 100),
+        href: s.href || '',
+        pos: i + 1,
+        samsung,
+        brand: samsung ? 'samsung' : brandOf(sig),
+        division: divisionOf(sig),
+      };
+    });
+    // Cycled slides replace the static hero classification only when the
+    // cycle plausibly covered the carousel: 2+ slides observed, or the static
+    // pass itself saw at most 1 hero. A partial cycle (1 slide) must not
+    // shadow a static classification that found a full carousel.
+    const staticHeroCount = recs.filter((r) => classOf(r) === 'hero').length;
+    const heroOverride = slideRecs.length >= 2 || (slideRecs.length === 1 && staticHeroCount <= 1);
+    if (process.env.DEBUG_SECTIONS && heroOverride) {
+      console.log(`\n[debug] hero slides via carousel cycling (${slideRecs.length}):`);
+      slideRecs.forEach((r) =>
+        console.log(
+          `  ${r.pos}. samsung=${r.samsung} brand=${r.brand} ${(r.src || '(no img)').slice(0, 80)} href=${(r.href || '-').slice(0, 70)} | ${r.alt.slice(0, 60)}`
+        )
+      );
+    }
+    // Drop static records that duplicate a cycled hero slide — by class
+    // (anything the width test already called hero) AND by identity. Identity
+    // means the CREATIVE (src): a promo card with its own image is a distinct
+    // placement even when it links to the same destination as a hero slide
+    // (Omantel's device cards share the store-collection URL with two hero
+    // slides). Href identity only applies to link-only records — those are
+    // the slide's own overlay anchors (Vodafone).
+    const slideSrcKeys = new Set();
+    const slideHrefKeys = new Set();
+    for (const s of slideRecs) {
+      if (s.src) slideSrcKeys.add(normalizeUrl(s.src, true));
+      if (s.href) slideHrefKeys.add(normalizeUrl(s.href));
+    }
+    const staticRecs = heroOverride
+      ? recs.filter(
+          (r) =>
+            classOf(r) !== 'hero' &&
+            !(r.src && slideSrcKeys.has(normalizeUrl(r.src, true))) &&
+            !(!r.src && r.href && slideHrefKeys.has(normalizeUrl(r.href)))
+        )
+      : recs;
+
     const section = (cls) => {
       // Document order so pos matches what a visitor sees (slide 1 first).
-      const all = recs.filter((r) => classOf(r) === cls).sort((a, b) => a.docIdx - b.docIdx);
+      const all = staticRecs.filter((r) => classOf(r) === cls).sort((a, b) => a.docIdx - b.docIdx);
       if (process.env.DEBUG_SECTIONS) {
         console.log(`\n[debug] ${cls} placements (${all.length}):`);
         all.forEach((r, i) =>
@@ -602,18 +1060,31 @@ async function countSamsungBanners(site) {
       return { count: matches.length, total: all.length, matches, rivals, brands: brandTally(all) };
     };
 
+    const heroFromSlides = () => ({
+      count: slideRecs.filter((r) => r.samsung).length,
+      total: slideRecs.length,
+      matches: slideRecs
+        .filter((r) => r.samsung)
+        .map(({ key, src, alt, href, pos }) => ({ key, src, alt, href, pos })),
+      rivals: slideRecs
+        .filter((r) => !r.samsung && r.brand && r.brand !== 'other')
+        .slice(0, 40)
+        .map(({ key, src, alt, href, pos, brand, division }) => ({ key, src, alt, href, pos, brand, division })),
+      brands: brandTally(slideRecs),
+    });
+
     // Division breakdown across ALL placements: division -> brand -> count.
     // 'other'-brand placements are skipped (site chrome, unbranded promos) so
     // divisions compare identified brands head-to-head.
     const divisions = {};
-    for (const r of recs) {
+    for (const r of [...staticRecs, ...slideRecs]) {
       if (r.brand === 'other' || r.division === 'other') continue;
       divisions[r.division] = divisions[r.division] || {};
       divisions[r.division][r.brand] = (divisions[r.division][r.brand] || 0) + 1;
     }
 
     return {
-      hero: section('hero'),
+      hero: heroOverride ? heroFromSlides() : section('hero'),
       promo: section('promo'),
       tiles: section('tile'),
       divisions,
@@ -635,6 +1106,11 @@ module.exports = {
   detectBlock,
   autoScroll,
   BlockedError,
+  // exported for diagnostics (debug-*.js scripts)
+  captureActiveHeroInPage,
+  detectHeroControlInPage,
+  clickHeroControlInPage,
+  HERO_BAND_PX,
 };
 
 // ---- CLI: prove the scraper against a single site (default: e&) ----
