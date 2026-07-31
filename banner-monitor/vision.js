@@ -175,7 +175,82 @@ async function visionCheck(site, screenshotPath, domCounts) {
   };
 }
 
-module.exports = { visionCheck };
+/* ---------- hero slide classification ---------- */
+
+const SLIDE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['slides'],
+  properties: {
+    slides: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['pos', 'samsung', 'brand'],
+        properties: {
+          pos: { type: 'integer', description: 'The SLIDE number given with the image' },
+          samsung: {
+            type: 'boolean',
+            description: 'True when Samsung products or Samsung branding appear anywhere in the slide artwork',
+          },
+          brand: {
+            type: 'string',
+            description:
+              'Dominant brand id, lowercase: samsung, apple, huawei, honor, xiaomi, oppo, vivo, realme, nothing, google, infinix, tecno, lg, tcl, hisense, sony, bosch, beko, midea, haier, dyson, jbl — or "other"',
+          },
+        },
+      },
+    },
+  },
+};
+
+// Classify hero carousel slides by their creative PIXELS. Multi-brand offer
+// artwork (e.g. "10% off tablets" showing Galaxy Tabs and a SAMSUNG logo)
+// often carries no Samsung text in URL/alt/href, so the DOM classifier calls
+// it non-Samsung — the artwork itself is the only reliable signal.
+async function classifyHeroSlides(site, slides) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const usable = (slides || []).filter((s) => s.src && /^https?:\/\//i.test(s.src)).slice(0, 16);
+  if (!usable.length) return null;
+
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new Anthropic({ timeout: 120000, maxRetries: 1 });
+
+  const content = [];
+  for (const s of usable) {
+    content.push({ type: 'text', text: `SLIDE ${s.pos}:` });
+    content.push({ type: 'image', source: { type: 'url', url: s.src } });
+  }
+  content.push({
+    type: 'text',
+    text:
+      `These are the hero-carousel slides of ${site.name} (${site.url}), a Gulf retail/telecom site. ` +
+      `Judge each slide from its artwork alone: does it feature Samsung products or Samsung branding? ` +
+      `Count multi-brand offers that visibly include Samsung devices or the Samsung logo as samsung=true. ` +
+      `Also name the dominant brand of each slide. Return one entry per slide, keyed by the SLIDE numbers above.`,
+  });
+
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    output_config: { format: { type: 'json_schema', schema: SLIDE_SCHEMA } },
+    messages: [{ role: 'user', content }],
+  });
+  if (response.stop_reason === 'refusal') {
+    throw new Error('vision model declined the request');
+  }
+  const textBlock = response.content.find((b) => b.type === 'text');
+  if (!textBlock) throw new Error(`no text block in response (stop_reason: ${response.stop_reason})`);
+  const parsed = JSON.parse(textBlock.text);
+  const byPos = new Map();
+  for (const s of parsed.slides || []) {
+    byPos.set(s.pos | 0, { samsung: !!s.samsung, brand: String(s.brand || 'other').toLowerCase() });
+  }
+  return byPos;
+}
+
+module.exports = { visionCheck, classifyHeroSlides };
 
 // ---- CLI: node banner-monitor/vision.js [siteId] — checks the latest stored run ----
 if (require.main === module) {

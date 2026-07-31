@@ -615,7 +615,7 @@ function clickHeroControlInPage({ mode, sel, index, bandBottom }) {
 // Node-side driver: cycle the hero carousel and return one record per slide,
 // in visual order. Returns null when no carousel control is found — caller
 // falls back to the static classification.
-async function cycleHeroSlides(page, site) {
+async function cycleHeroSlides(page, site, anchorHero) {
   const control = await page.evaluate(detectHeroControlInPage, HERO_BAND_PX);
   if (!control) return null;
   const CAP = { bandBottom: HERO_BAND_PX, noCaption: !!(site && site.heroNoCaption) };
@@ -679,6 +679,17 @@ async function cycleHeroSlides(page, site) {
       if (!ok) break;
       await page.waitForTimeout(1300);
       push(await stableCapture());
+    }
+    // Observation starts wherever autoplay happens to be, but the cyclic
+    // order is preserved — rotate so the anchor slide (active at page load,
+    // i.e. the visitor's slide 1) leads and positions read true.
+    if (anchorHero && anchorHero.url && states.length > 1) {
+      const idx = states.findIndex((s) => s.url === anchorHero.url);
+      if (idx > 0) {
+        const rotated = states.slice(idx).concat(states.slice(0, idx));
+        states.length = 0;
+        states.push(...rotated);
+      }
     }
   }
   return states.length ? states : null;
@@ -770,6 +781,18 @@ async function countSamsungBanners(site) {
     await gotoWithRetry(page, site.url, BROWSER.navTimeoutMs);
     await dismissConsent(page, site);
     await detectBlock(page); // throws BlockedError -> recorded as error, not 0
+
+    // On load a carousel sits on slide 1, and autoplay only advances after a
+    // few seconds — capture the active hero NOW so next-arrow cycling (which
+    // starts wherever autoplay happens to be by then) can rotate its observed
+    // order back to the visitor's true slide order.
+    let anchorHero = null;
+    try {
+      anchorHero = await page.evaluate(captureActiveHeroInPage, { bandBottom: HERO_BAND_PX, noCaption: true });
+    } catch {
+      /* anchor is best-effort */
+    }
+
     await autoScroll(page);
 
     const candidates = await page.evaluate(collectCandidatesInPage, {
@@ -784,7 +807,7 @@ async function countSamsungBanners(site) {
     // width-based hero classification below.
     let heroSlides = null;
     try {
-      heroSlides = await cycleHeroSlides(page, site);
+      heroSlides = await cycleHeroSlides(page, site, anchorHero);
     } catch (err) {
       console.warn(`[scraper] hero cycle failed for ${site.id}: ${err.message}`);
     }
@@ -1071,6 +1094,19 @@ async function countSamsungBanners(site) {
         .slice(0, 40)
         .map(({ key, src, alt, href, pos, brand, division }) => ({ key, src, alt, href, pos, brand, division })),
       brands: brandTally(slideRecs),
+      // The complete observed slide list — run.js feeds these creatives to the
+      // vision model, which catches Samsung branding that only exists in the
+      // artwork (multi-brand offer slides with generic URLs).
+      slides: slideRecs.map(({ key, src, alt, href, pos, samsung, brand, division }) => ({
+        key,
+        src,
+        alt,
+        href,
+        pos,
+        samsung,
+        brand,
+        division,
+      })),
     });
 
     // Division breakdown across ALL placements: division -> brand -> count.

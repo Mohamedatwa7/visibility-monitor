@@ -17,7 +17,7 @@ require('dotenv').config();
 const { SITES } = require('./config');
 const { countSamsungBanners } = require('./scraper');
 const { measureDeviceShare, measureSearchShare } = require('./share');
-const { visionCheck } = require('./vision');
+const { visionCheck, classifyHeroSlides } = require('./vision');
 const { fetchS26Reviews } = require('./reviews');
 const store = require('./store');
 const { buildChanges, sendAlert } = require('./notify');
@@ -70,6 +70,48 @@ async function runOnce(siteFilter) {
         countSamsungBanners(site),
         `${site.name} banner scrape`
       );
+
+      // AI slide classification: hero creatives whose Samsung identity exists
+      // only in the artwork (multi-brand offer slides with generic URLs) are
+      // invisible to the DOM's text signals — judge the pixels instead.
+      if (process.env.ANTHROPIC_API_KEY && hero.slides && hero.slides.length) {
+        try {
+          const byPos = await withTimeout(classifyHeroSlides(site, hero.slides), `${site.name} slide classification`);
+          if (byPos) {
+            let changed = 0;
+            for (const s of hero.slides) {
+              const v = byPos.get(s.pos);
+              if (!v) continue;
+              if (v.samsung && !s.samsung) {
+                s.samsung = true;
+                s.brand = 'samsung';
+                changed++;
+              } else if (!s.samsung && (!s.brand || s.brand === 'other') && v.brand && v.brand !== 'other') {
+                s.brand = v.brand;
+                changed++;
+              }
+            }
+            if (changed) {
+              hero.matches = hero.slides
+                .filter((s) => s.samsung)
+                .map(({ key, src, alt, href, pos }) => ({ key, src, alt, href, pos }));
+              hero.count = hero.matches.length;
+              hero.rivals = hero.slides
+                .filter((s) => !s.samsung && s.brand && s.brand !== 'other')
+                .slice(0, 40)
+                .map(({ key, src, alt, href, pos, brand, division }) => ({ key, src, alt, href, pos, brand, division }));
+              hero.brands = {};
+              for (const s of hero.slides) hero.brands[s.brand || 'other'] = (hero.brands[s.brand || 'other'] || 0) + 1;
+              console.log(`\n        AI slide check: ${changed} slide(s) reclassified from artwork`);
+              process.stdout.write(`        `);
+            }
+          }
+        } catch (err) {
+          console.log(`\n        AI slide check … FAILED — ${err.message}`);
+          process.stdout.write(`        `);
+        }
+      }
+
       console.log(
         `hero ${hero.count}/${hero.total} · promo ${promo.count}/${promo.total} · tiles ${tiles.count}/${tiles.total}`
       );
