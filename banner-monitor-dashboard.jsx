@@ -747,10 +747,13 @@ function PostingChart({ posts, bucket, title, rivals }) {
     return d.toISOString().slice(0, 10);
   };
   const keyOf = bucket === 'week' ? (p) => startOfWeek(p.at) : (p) => String(p.at).slice(0, 7);
+  // Weeks are labeled by ISO week number (W31); the hover title carries the
+  // week's start date so the number stays interpretable.
   const labelOf =
     bucket === 'week'
-      ? (k) => new Date(`${k}T00:00:00Z`).toLocaleString(undefined, { day: 'numeric', month: 'short' })
+      ? (k) => `W${isoWeekOf(k)}`
       : (k) => new Date(`${k}-01T00:00:00Z`).toLocaleString(undefined, { month: 'short' });
+  const weekStartLbl = (k) => new Date(`${k}T00:00:00Z`).toLocaleString(undefined, { day: 'numeric', month: 'short' });
 
   const buckets = {};
   for (const p of posts) {
@@ -790,7 +793,11 @@ function PostingChart({ posts, bucket, title, rivals }) {
             ...rivals.filter((b) => m.byRival[b]).map((b) => `${brandMeta(b).label} ${m.byRival[b]}`),
           ];
           return (
-            <div key={k} style={T.col} title={`${bucket === 'week' ? 'Week of ' : ''}${label}: ${parts.join(' · ')}`}>
+            <div
+              key={k}
+              style={T.col}
+              title={`${bucket === 'week' ? `${label} (week of ${weekStartLbl(k)})` : label}: ${parts.join(' · ')}`}
+            >
               <div style={T.colPct}>{sov == null ? '–' : `${sov}%`}</div>
               <div style={{ ...T.colBar, height: Math.max(px(total), 3) }}>
                 {rivals
@@ -1736,6 +1743,28 @@ const FEED_PAGE = 8;
 // Launch products the spotlight KPI can switch between. S26 uses the
 // backend's classification of the full caption; the others are matched
 // client-side against the stored caption snippet.
+// Division inference for social posts (captions carry no division field).
+const DIVISION_RES = {
+  mobile: /galaxy\s*[sza]\s?\d|fold|flip|iphone|smart\s?phone|\bphones?\b|redmi|\breno\b|mate\s?\d|pura\s?\d|pixel\s?\d/i,
+  wearable: /\bwatch|band\s?\d/i,
+  computing: /\btab\b|tablet|ipad|laptop|galaxy\s?book|macbook|chromebook/i,
+  audio: /buds|earbud|headphone|earphone|airpods|speaker|soundbar/i,
+  tv: /\btvs?\b|oled|qled|television|the\s?frame|\b8k\b/i,
+  appliance: /fridge|refrigerator|washer|washing\s?machine|dryer|dishwasher|vacuum|air\s?fryer|airfryer|microwave|\boven\b|bespoke|air\s?conditioner/i,
+};
+const postInDivision = (p, div) => {
+  const re = DIVISION_RES[div];
+  return re ? re.test(p.caption || '') : false;
+};
+
+// ISO week number for a YYYY-MM-DD date string.
+function isoWeekOf(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+
 const SPOTLIGHT_PRODUCTS = [
   { key: 's26', label: 'S26', full: 'Galaxy S26 series', match: (p) => !!p.s26 },
   {
@@ -1852,6 +1881,7 @@ function SocialView({ social }) {
   const [to, setTo] = useState('');
   const [chartSites, setChartSites] = useState(null);
   const [chartRival, setChartRival] = useState(null);
+  const [chartDivision, setChartDivision] = useState('all'); // Samsung division lens on the charts
   const [feedSite, setFeedSite] = useState(null);
   const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
   const [spotlight, setSpotlight] = useState('s26'); // product on the spotlight KPI
@@ -1923,8 +1953,13 @@ function SocialView({ social }) {
   }, [filtered]);
 
   const chartPosts = useMemo(
-    () => (chartSites && chartSites.length ? filtered.filter((p) => chartSites.includes(p.site)) : filtered),
-    [filtered, chartSites]
+    () =>
+      filtered.filter(
+        (p) =>
+          (!chartSites || !chartSites.length || chartSites.includes(p.site)) &&
+          (chartDivision === 'all' || postInDivision(p, chartDivision))
+      ),
+    [filtered, chartSites, chartDivision]
   );
 
   const chartRivals = useMemo(() => {
@@ -2119,7 +2154,7 @@ function SocialView({ social }) {
             </button>
           ))}
         </div>
-        <div style={{ ...T.pickerRow, marginBottom: 14 }}>
+        <div style={T.pickerRow}>
           <span style={T.filterLabel}>Versus</span>
           <button className="vm-press" style={{ ...T.chip, ...(!chartRival ? T.chipOn : {}) }} onClick={() => setChartRival(null)}>
             All competitors
@@ -2132,6 +2167,27 @@ function SocialView({ social }) {
               onClick={() => setChartRival(chartRival === b ? null : b)}
             >
               {brandMeta(b).label}
+            </button>
+          ))}
+        </div>
+        <div style={{ ...T.pickerRow, marginBottom: 14 }}>
+          <span style={T.filterLabel}>Division</span>
+          <button
+            className="vm-press"
+            style={{ ...T.chip, ...(chartDivision === 'all' ? T.chipOn : {}) }}
+            onClick={() => setChartDivision('all')}
+          >
+            All divisions
+          </button>
+          {DIVISION_ORDER.map((d) => (
+            <button
+              key={d}
+              className="vm-press"
+              style={{ ...T.chip, ...(chartDivision === d ? T.chipOn : {}) }}
+              onClick={() => setChartDivision(chartDivision === d ? 'all' : d)}
+              title={`Only posts about ${DIVISION_LABELS[d]} (matched in captions)`}
+            >
+              {DIVISION_CODES[d]}
             </button>
           ))}
         </div>

@@ -180,7 +180,13 @@ function collectCandidatesInPage({ containerSource, containerFlags }) {
   // 792px img sits in a 1200px eand-rmp-hero-banner-tile), so the slide's
   // width, not the image's, is what says "this is the big picture".
   const blockInfoFor = (el) => {
+    // Innermost match keeps the historic dedupe key + width; `all` collects
+    // every block-ish ancestor (slide-bg AND its slick-slide AND the carousel
+    // wrapper) so a slide's image and its CTA — which sit in different
+    // sub-blocks — can be recognized as one placement later.
     let cur = el;
+    let first = null;
+    const all = [];
     for (let i = 0; i < 8 && cur; i++) {
       if (BLOCK.test(cls(cur))) {
         let id = blockIds.get(cur);
@@ -188,12 +194,15 @@ function collectCandidatesInPage({ containerSource, containerFlags }) {
           id = ++blockCounter;
           blockIds.set(cur, id);
         }
-        const r = cur.getBoundingClientRect ? cur.getBoundingClientRect() : { width: 0 };
-        return { key: 'block#' + id, w: Math.round(r.width) || 0 };
+        if (!first) {
+          const r = cur.getBoundingClientRect ? cur.getBoundingClientRect() : { width: 0 };
+          first = { key: 'block#' + id, w: Math.round(r.width) || 0 };
+        }
+        all.push('block#' + id);
       }
       cur = cur.parentElement;
     }
-    return { key: '', w: 0 };
+    return first ? { key: first.key, w: first.w, all } : { key: '', w: 0, all };
   };
   // Text belonging to THIS candidate's own slide/tile (not the surrounding
   // carousel, whose innerText contains every sibling slide's caption). Used by
@@ -279,6 +288,7 @@ function collectCandidatesInPage({ containerSource, containerFlags }) {
       text: nearestContainerText(el),
       blockText: blockTextFor(el),
       block: blockInfo.key,
+      blockAll: blockInfo.all,
       inChrome: inChrome(el),
     });
   });
@@ -474,10 +484,53 @@ async function countSamsungBanners(site) {
       if (imageUrl) rec.ownW = Math.max(rec.ownW, c.ownW || 0);
       rec.tile = rec.tile || isTile;
       rec.samsung = rec.samsung || isSamsung;
+      for (const b of c.blockAll || (c.block ? [c.block] : [])) (rec.blocks = rec.blocks || new Set()).add(b);
       // Accumulated signal text for brand/division classification (competition
       // analysis) — same signals the Samsung test reads.
       rec.sig = `${rec.sig} ${ownSignals.filter(Boolean).join(' ')}`.slice(0, 600);
       byKey.set(key, rec);
+    }
+
+    // A slide's image and its CTA link often carry DIFFERENT dedupe keys (the
+    // <img> has no href; the link-only <a> has no creative), so one carousel
+    // slide counts twice (Zain KW: 9 slides read as 17). Merge every link-only
+    // record into the image-bearing record that shares its slide block.
+    {
+      // block -> every image-bearing record touching it. A merge only happens
+      // through a block with EXACTLY ONE image record: per-slide blocks
+      // qualify, carousel-wide wrappers (shared by all slides) never do.
+      const imageRecsByBlock = new Map();
+      for (const r of byKey.values()) {
+        if (!r.src || !r.blocks) continue;
+        for (const b of r.blocks) {
+          const list = imageRecsByBlock.get(b) || [];
+          if (!list.includes(r)) list.push(r);
+          imageRecsByBlock.set(b, list);
+        }
+      }
+      for (const [key, r] of Array.from(byKey.entries())) {
+        if (r.src || !r.blocks) continue; // only link-only records
+        let host = null;
+        for (const b of r.blocks) {
+          const list = imageRecsByBlock.get(b);
+          if (list && list.length === 1 && list[0] !== r) {
+            host = list[0];
+            break;
+          }
+        }
+        if (!host) continue;
+        if (!host.href && r.href) host.href = r.href;
+        if (!host.alt && r.alt) host.alt = r.alt;
+        host.w = Math.max(host.w, r.w);
+        host.tile = host.tile || r.tile;
+        host.samsung = host.samsung || r.samsung;
+        host.sig = `${host.sig} ${r.sig}`.slice(0, 600);
+        // Keep the creative's geometry — link-only anchors are often hidden
+        // (rect at 0,0) and would corrupt the band/position data.
+        if (host.top == null && r.top != null) host.top = r.top;
+        if (r.docIdx < host.docIdx) host.docIdx = r.docIdx;
+        byKey.delete(key);
+      }
     }
 
     const recs = Array.from(byKey.values());
