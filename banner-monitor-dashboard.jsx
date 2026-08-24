@@ -1356,6 +1356,18 @@ function SiteDetail({ site, onBack }) {
                       {site.bannerTotal ? ` of ${site.bannerTotal}` : ''}
                     </Tag>
                   )}
+                  {/* Absence is a finding, not missing data: keep the position
+                      tag visible when Samsung holds NO slide in the carousel
+                      (an AI-reconciled count — e.g. a Samsung popup — can still
+                      show a nonzero share while the carousel itself has none). */}
+                  {m.key === 'hero' && heroSlots.length === 0 && site.bannerTotal > 0 && (
+                    <Tag
+                      tone="red"
+                      title="Samsung has no slide in the hero carousel right now — the position returns when a Samsung creative re-enters the rotation"
+                    >
+                      Hero banner position: none of {site.bannerTotal} slides
+                    </Tag>
+                  )}
                   {m.key === 'shelf' && site.deviceShare && site.deviceShare.pages > 1 && (
                     <span style={T.moveMuted}>first {site.deviceShare.pages} pages</span>
                   )}

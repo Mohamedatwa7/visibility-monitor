@@ -205,6 +205,61 @@ const SLIDE_SCHEMA = {
   },
 };
 
+// Video creatives (Sharaf DG ships hero slides as .mp4) can't go to the API
+// as image blocks, and one unsupported source 400s the WHOLE request — which
+// silently zeroed Samsung's hero count whenever a video slide was present.
+const VIDEO_SRC = /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i;
+
+// Re-render every slide creative to a PNG frame in headless Chromium (already
+// a dependency): <video> sources get a mid-clip frame, everything else loads
+// in an <img>. The API then always receives valid PNG — a format it accepts —
+// regardless of what container/codec/format the site ships.
+async function renderSlideFrames(slides) {
+  const { chromium } = require('playwright');
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const frames = [];
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    for (const s of slides) {
+      try {
+        const src = s.src.replace(/"/g, '&quot;');
+        const tag = VIDEO_SRC.test(s.src)
+          ? `<video id="m" src="${src}" muted autoplay playsinline style="width:1280px;display:block"></video>`
+          : `<img id="m" src="${src}" style="width:1280px;display:block">`;
+        await page.setContent(`<style>*{margin:0;padding:0}</style>${tag}`, { timeout: 20000 });
+        await page.waitForFunction(
+          () => {
+            const el = document.getElementById('m');
+            if (!el) return false;
+            return el.tagName === 'VIDEO' ? el.readyState >= 2 : el.complete && el.naturalWidth > 0;
+          },
+          { timeout: 20000 }
+        );
+        // Videos: seek off the (often black) first frame to real artwork.
+        await page.evaluate(
+          () =>
+            new Promise((res) => {
+              const v = document.getElementById('m');
+              if (v.tagName !== 'VIDEO') return res();
+              v.pause();
+              v.onseeked = () => res();
+              v.currentTime = Math.min(1.5, (v.duration || 3) / 2);
+              setTimeout(res, 3000); // seek watchdog — capture whatever frame we have
+            })
+        );
+        await page.waitForTimeout(200); // let decode settle
+        frames.push({ slide: s, png: (await page.locator('#m').screenshot({ type: 'png' })).toString('base64') });
+      } catch {
+        // Unloadable creative (dead URL, undecodable codec) — skip this slide
+        // and classify the rest instead of losing the whole batch.
+      }
+    }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  return frames;
+}
+
 // Classify hero carousel slides by their creative PIXELS. Multi-brand offer
 // artwork (e.g. "10% off tablets" showing Galaxy Tabs and a SAMSUNG logo)
 // often carries no Samsung text in URL/alt/href, so the DOM classifier calls
@@ -214,13 +269,16 @@ async function classifyHeroSlides(site, slides) {
   const usable = (slides || []).filter((s) => s.src && /^https?:\/\//i.test(s.src)).slice(0, 16);
   if (!usable.length) return null;
 
+  const frames = await renderSlideFrames(usable);
+  if (!frames.length) return null;
+
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ timeout: 120000, maxRetries: 1 });
 
   const content = [];
-  for (const s of usable) {
-    content.push({ type: 'text', text: `SLIDE ${s.pos}:` });
-    content.push({ type: 'image', source: { type: 'url', url: s.src } });
+  for (const f of frames) {
+    content.push({ type: 'text', text: `SLIDE ${f.slide.pos}:` });
+    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: f.png } });
   }
   content.push({
     type: 'text',
