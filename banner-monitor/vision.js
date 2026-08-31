@@ -66,7 +66,7 @@ const RESULT_SCHEMA = {
   properties: {
     hero_banner_count: {
       type: 'integer',
-      description: 'Distinct Samsung HERO banners: the big campaign picture, usually the top carousel',
+      description: 'Distinct Samsung HERO banners: the big campaign picture in the top-of-page carousel only',
     },
     promo_card_count: {
       type: 'integer',
@@ -97,7 +97,8 @@ function buildPrompt(site) {
   return (
     `This is a full-page screenshot of the ${site.name} homepage (${site.url}), a retail/telecom site in the Gulf region.\n\n` +
     `Count every distinct SAMSUNG promotional placement visible on the page, classified into three sections:\n` +
-    `1. HERO BANNER — the big campaign picture, usually the top-of-page carousel (occasionally a full-width banner elsewhere).\n` +
+    `1. HERO BANNER — the big campaign picture in the TOP-OF-PAGE carousel/banner only (the first thing a visitor ` +
+    `sees before scrolling). A big or full-width Samsung banner further down the page is a PROMO CARD, not a hero.\n` +
     `2. PROMO CARD — a mid-size promotional box, card, or strip advertising a Samsung product or campaign ` +
     `(e.g. "Get the new Galaxy Z Fold7 with upgraded Galaxy AI"). Not purchasable directly.\n` +
     `3. PRODUCT TILE — a specific purchasable Samsung product shown with its price and/or an add-to-cart/buy option.\n\n` +

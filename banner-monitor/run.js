@@ -66,10 +66,19 @@ async function runOnce(siteFilter) {
 
     process.stdout.write(`[run] ${site.name} … `);
     try {
-      const { hero, promo, tiles, divisions, screenshotPath } = await withTimeout(
-        countSamsungBanners(site),
-        `${site.name} banner scrape`
-      );
+      // One retry on the homepage scrape: WAF rejections (Ooredoo's F5 threw
+      // "Request Rejected" 2026-08-31) and load hiccups are often transient —
+      // without it a single failure leaves the dashboard a full day stale.
+      let scraped;
+      try {
+        scraped = await withTimeout(countSamsungBanners(site), `${site.name} banner scrape`);
+      } catch (err) {
+        console.log(`first attempt failed (${err.message}) — retrying in 20s … `);
+        await new Promise((r) => setTimeout(r, 20000));
+        process.stdout.write(`[run] ${site.name} (retry) … `);
+        scraped = await withTimeout(countSamsungBanners(site), `${site.name} banner scrape retry`);
+      }
+      const { hero, promo, tiles, divisions, screenshotPath } = scraped;
 
       // AI slide classification: hero creatives whose Samsung identity exists
       // only in the artwork (multi-brand offer slides with generic URLs) are

@@ -29,12 +29,17 @@ router.get('/api/sites', async (_req, res) => {
     // AI reconciliation (not shown as a discrepancy): the DOM count is the
     // metric, but when the DOM finds NOTHING in a section and the AI clearly
     // sees Samsung placements there, the DOM selectors are blind to that
-    // section (e.g. e&'s CSS-background hero) — display the AI's count as the
-    // higher-confidence number.
+    // section — display the AI's count as the higher-confidence number.
     // Only when the DOM sees NOTHING in a section AND the AI's count doesn't
     // contradict the DOM's denominator (an AI count above the section total
     // means the AI counted items the DOM classified elsewhere — showing
     // "2/1" would be nonsense).
+    // NEVER for the hero count: hero positions shown on the dashboard come
+    // from the DOM matches, so an AI-only hero would display as "1/1" with an
+    // empty position list (seen on Amazon/Sharaf DG, where the AI mislabeled
+    // mid-page sections as hero). The carousel-cycling + AI slide-artwork
+    // pipeline already covers heroes the DOM text signals miss, so the DOM
+    // hero count stands on its own.
     const reconcile = (domCount, aiCount, total) =>
       domCount === 0 && aiCount != null && aiCount >= 1 && (!total || aiCount <= total) ? aiCount : domCount;
 
@@ -50,7 +55,7 @@ router.get('/api/sites', async (_req, res) => {
         url: site.url,
         region: site.region,
         type: site.type || 'operator',
-        count: latest ? (vc ? reconcile(latest.count, vc.hero, latest.banner_total) : latest.count) : null,
+        count: latest ? latest.count : null,
         bannerTotal: latest ? (latest.banner_total == null ? null : latest.banner_total) : null,
         promoCount: latest
           ? vc
