@@ -75,7 +75,9 @@ const SITES = [
     // so plain image dedupe would collapse all tiles into one entry.
     bannerDedupe: 'image-query',
     // Device-catalog share. shop.du.ae is an SAP Commerce SPA (flat HTTP only
-    // returns an app shell) â€” cards must be waited for. Paging shows "40 of 162".
+    // returns an app shell) â€” cards must be waited for. Paging shows "40 of 162"
+    // (2026-09-03: the grid now loads everything — "Showing 192 of 192", each
+    // variant its own card, all hrefs distinct — so ~55% Samsung share is real).
     devices: {
       url: 'https://shop.du.ae/en/personal/c-mobile-phones#category=mobile-phones&brands=all',
       card: 'a.du-device-card',
@@ -195,6 +197,11 @@ const SITES = [
     region: 'Bahrain',
     timezoneId: 'Asia/Bahrain',
     locale: 'en-BH',
+    // The homepage device showcase is brand-tabbed and defaults to the apple
+    // tab: the "samsung galaxy" tab's cards only mount when clicked, so
+    // Samsung read 0 promos while apple's 6 cards counted (seen 2026-09-03).
+    // The reveal pass clicks the tab and merges what appears.
+    revealClicks: [/^samsung galaxy$/i],
     // OpenCart shop; 32 cards render with a load-more button. Product hrefs
     // are opaque ids (product_id=7149) â€” brand lives in the card text.
     devices: {

@@ -235,6 +235,21 @@ function collectCandidatesInPage({ containerSource, containerFlags }) {
     'header, nav, footer, [class*="mega" i], [class*="navbar" i], [class*="navigation" i], [id*="footer" i], [id*="header" i]';
   const inChrome = (el) => !!(el.closest && el.closest(chromeSel));
 
+  // Class of the nearest display:none/visibility:hidden ancestor (or self).
+  // Sites ship a hidden mobile twin of each banner (Zain KW's custom-mob-d
+  // slider holds a full duplicate carousel; its z-card-image-news-mobile cards
+  // duplicate every news banner) — the wrapper's class lets Node recognise
+  // and skip these responsive alternates.
+  const hiddenClsFor = (el) => {
+    let cur = el;
+    for (let i = 0; i < 10 && cur && cur !== document.documentElement; i++) {
+      const cs = getComputedStyle(cur);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return cls(cur).trim() || cur.tagName;
+      cur = cur.parentElement;
+    }
+    return '';
+  };
+
   const els = new Set();
   // 1) every img
   document.querySelectorAll('img').forEach((e) => els.add(e));
@@ -290,6 +305,7 @@ function collectCandidatesInPage({ containerSource, containerFlags }) {
       block: blockInfo.key,
       blockAll: blockInfo.all,
       inChrome: inChrome(el),
+      hiddenCls: hiddenClsFor(el),
     });
   });
   return out;
@@ -360,12 +376,17 @@ function captureActiveHeroInPage(opts) {
   // horizontal sliders the neighbor slides peek in from the edges, and a
   // mid-transition capture could otherwise pick the outgoing slide.
   const centerX = window.innerWidth / 2;
+  // A hero creative is billboard-scale: at least half the viewport wide (the
+  // narrowest real one is e&'s 792px at 1440). Without this floor, a page
+  // with NO billboard at all (Amazon's top is strips of ~450px cards) gets
+  // one strip card captured as a phantom single-slide hero carousel.
+  const minHeroW = Math.max(300, window.innerWidth * 0.5);
   let best = null;
   const consider = (el, url) => {
     if (!url || ICON_RE.test(url)) return;
     if (inChrome(el)) return;
     const r = el.getBoundingClientRect();
-    if (r.width < 300 || r.height < 100) return;
+    if (r.width < minHeroW || r.height < 100) return;
     if (r.bottom <= 0 || r.top >= bandBottom) return;
     if (!isShown(el)) return;
     const area = r.width * (Math.min(r.bottom, bandBottom) - Math.max(r.top, 0));
@@ -610,6 +631,36 @@ function clickHeroControlInPage({ mode, sel, index, bandBottom }) {
     t.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
   }
   return true;
+}
+
+// Runs in-page: click a non-navigating control whose own text matches the
+// given pattern — used to open brand tabs that mount their content on click
+// only (stc Bahrain's device showcase defaults to the apple tab; the
+// "samsung galaxy" tab's cards are not in the DOM until clicked).
+function clickRevealInPage(reSource) {
+  const re = new RegExp(reSource, 'i');
+  const chromeSel =
+    'header, nav, footer, [class*="mega" i], [class*="navbar" i], [class*="navigation" i], [id*="footer" i], [id*="header" i]';
+  const nodes = Array.from(document.querySelectorAll('button, [role="button"], [role="tab"], a, li, span, div'));
+  for (const n of nodes) {
+    if (n.closest(chromeSel)) continue;
+    // Never click an anchor that truly navigates — the reveal must mutate
+    // this page, not leave it.
+    if (n.tagName === 'A') {
+      const href = n.getAttribute('href') || '';
+      if (href && !/^#|^javascript:/i.test(href)) continue;
+    }
+    const txt = (n.innerText || '').replace(/\s+/g, ' ').trim();
+    if (!txt || txt.length > 40 || !re.test(txt)) continue;
+    const r = n.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    n.scrollIntoView({ block: 'center' });
+    for (const type of ['mousedown', 'mouseup', 'click']) {
+      n.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
+    return txt;
+  }
+  return null;
 }
 
 // Slide identity shared by the passive watcher and the click-cycle.
@@ -887,6 +938,47 @@ async function countSamsungBanners(site) {
       console.warn(`[scraper] hero cycle failed for ${site.id}: ${err.message}`);
     }
 
+    // Reveal passes: content behind brand tabs mounts on click only — click
+    // each configured control and merge what newly appears. After the
+    // screenshot (which should show the default state) and after hero cycling
+    // (which the click must not disturb).
+    for (const revealRe of site.revealClicks || []) {
+      try {
+        const clicked = await page.evaluate(clickRevealInPage, revealRe.source);
+        if (!clicked) {
+          console.warn(`[scraper] reveal control ${revealRe} not found on ${site.id}`);
+          continue;
+        }
+        await page.waitForTimeout(2000);
+        const extra = await page.evaluate(collectCandidatesInPage, {
+          containerSource: CONTAINER_REGEX.source,
+          containerFlags: CONTAINER_REGEX.flags,
+        });
+        // Keep only what the click newly mounted (by creative/destination).
+        // Block ids from a fresh evaluate would collide with pass-1 ids, so
+        // prefix them — cross-pass block keys must never merge records.
+        const seen = new Set();
+        for (const c of candidates) {
+          if (c.src) seen.add(normalizeUrl(c.src, true));
+          if (c.href) seen.add(normalizeUrl(c.href));
+        }
+        let added = 0;
+        for (const c of extra) {
+          const sKey = c.src ? normalizeUrl(c.src, true) : '';
+          const hKey = c.href ? normalizeUrl(c.href) : '';
+          if ((sKey && seen.has(sKey)) || (hKey && seen.has(hKey))) continue;
+          if (!sKey && !hKey) continue;
+          c.block = c.block ? `r-${c.block}` : c.block;
+          c.blockAll = (c.blockAll || []).map((b) => `r-${b}`);
+          candidates.push(c);
+          added++;
+        }
+        console.log(`        reveal "${clicked}": ${added} new placement candidate(s)`);
+      } catch (err) {
+        console.warn(`[scraper] reveal pass failed for ${site.id}: ${err.message}`);
+      }
+    }
+
     // Merge the two observations. Dot-cycling keeps its own deterministic
     // order (dot N = slide N). Otherwise the passive from-load order leads —
     // it IS what a visitor sees — and the click-cycle only appends slides the
@@ -935,9 +1027,20 @@ async function countSamsungBanners(site) {
     // One merged record per placement key: dedupe first, classify after, so a
     // hero's full-width slide and its small inner button agree on one class.
     const byKey = new Map(); // key -> {src, alt, href, w, tile, samsung}
+    // Responsive alternates: a hidden mobile twin of a desktop banner is not a
+    // second placement — a desktop visitor never sees it and the desktop
+    // creative is already counted (Zain KW shipped a full duplicate mobile
+    // carousel that inflated its promo denominator by ~10). Only elements
+    // hidden by a wrapper whose class (or own image filename) says
+    // mobile/small-screen are skipped — hidden slides of ordinary carousels
+    // carry no such marker and still count.
+    const MOBILE_ALT_RE =
+      /\bmob(?:ile)?\b|[-_]mob(?:[-_]|\b)|\bmob[-_]|d-(?:sm|md|lg)-none|hidden-(?:desktop|lg|md|xl)|small-only|sm-only/i;
+
     for (const c of candidates) {
       if (c.inChrome) continue; // skip nav/header/footer/mega-menu
       if (c.clone) continue; // carousel loop duplicates — the original slide is also in the DOM
+      if (c.hiddenCls && (MOBILE_ALT_RE.test(c.hiddenCls) || /mobile/i.test(c.src || ''))) continue;
       if (TRACKER_RE.test(c.src || '') || TRACKER_RE.test(c.href || '')) continue;
       if (CHROME_LINK_RE.test(c.src || '') || CHROME_LINK_RE.test(c.href || '')) continue;
 

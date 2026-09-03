@@ -103,6 +103,18 @@ async function cardCount(page, cardSel) {
 async function expandOnce(page, cfg) {
   const before = await cardCount(page, cfg.card);
 
+  // Scroll to the list end FIRST and give scroll-driven growth a chance:
+  // for infinite-scroll grids the scroll IS the expansion, and clicking
+  // their fallback "Load more" ANCHOR instead truly navigates and REPLACES
+  // the grid (xhawi's ?page=N link did — Omantel kept sampling 24 of 121
+  // devices because the click wiped out what the scroll had just loaded).
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(500);
+    const now = await cardCount(page, cfg.card).catch(() => 0);
+    if (now > before) return true;
+  }
+
   const clicked = await page
     .evaluate((sel) => {
       const re = /load more|show more|view more|see more|more results/i;
@@ -120,10 +132,6 @@ async function expandOnce(page, cfg) {
       return false;
     }, cfg.loadMoreSelector || null)
     .catch(() => false);
-
-  if (!clicked) {
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-  }
 
   // Poll for growth; grids load in over a few seconds. Some "show more"
   // anchors truly navigate (Shopify ?page=2) — the count check tolerates the
@@ -280,6 +288,22 @@ async function measureDeviceShare(site) {
       cards = await collect();
     }
 
+    // One card per product URL: appending grids can re-append earlier batches
+    // (du's DOM held 192 cards while its own pager said "of 162") and
+    // page-replacing pagers can re-collect a page. Cards without an href
+    // (Vodafone's JS-navigation articles) are kept as-is — distinct products
+    // can share a title, so text is not safe as a dedupe key.
+    {
+      const seen = new Set();
+      cards = cards.filter((c) => {
+        if (!c.href) return true;
+        const k = c.href.trim().toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    }
+
     const { total, samsung, positions, brands } = tallyCards(cards, cfg.maxCards);
     const grandTotal = await readGrandTotal(page, cfg);
 
@@ -382,6 +406,20 @@ async function measureSearchShare(site) {
       ? cfg.terms
       : [cfg.term || 'phones'];
 
+    // Warm the session on the homepage first: cold-loading deep search URLs
+    // is a classic bot signature and Emax's Cloudflare has been challenging
+    // exactly that (search share NULL in prod since 2026-08-25) while the
+    // homepage loads fine. Best-effort — a challenge here still surfaces on
+    // the per-term loads.
+    try {
+      const warm = await context.newPage();
+      await gotoWithRetry(warm, site.url, BROWSER.navTimeoutMs);
+      await warm.waitForTimeout(2000);
+      await warm.close();
+    } catch {
+      /* warming failed — proceed to the terms anyway */
+    }
+
     const results = [];
     for (const term of terms) {
       try {
@@ -389,6 +427,9 @@ async function measureSearchShare(site) {
       } catch (err) {
         results.push({ term, error: err.message });
       }
+      // Human-ish pacing between term loads — burst navigation to N search
+      // URLs in a row is what trips the challenge.
+      await new Promise((r) => setTimeout(r, 3000));
     }
     // Partial WAF blocks poison the aggregate: when most terms fail
     // (Cloudflare challenging the run), the lone survivor is usually
