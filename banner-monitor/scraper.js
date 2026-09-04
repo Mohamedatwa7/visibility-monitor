@@ -1174,11 +1174,30 @@ async function countSamsungBanners(site) {
       return c;
     };
 
+    // Copy-vs-identity conflict: partner CMSes mislabel — Omantel's Honor
+    // Magic V6 card ships alt/title "Samsung Galaxy Z Fold8 5G" on honor.png
+    // linking to the honor product (seen 2026-09-04). When the
+    // machine-generated identity (creative filename + destination URL)
+    // matches NO Samsung signal but unambiguously names a rival brand,
+    // trust the identity over the copy fields and count the placement for
+    // that rival. A Samsung creative with generic URLs is untouched (its
+    // identity names no rival), and one whose URLs say Samsung never enters
+    // this branch.
+    const demoteMislabeled = (r, hardSig) => {
+      if (!r.samsung || !hardSig || regex.test(hardSig)) return;
+      const rival = brandOf(hardSig);
+      if (rival !== 'samsung' && rival !== 'other') {
+        r.samsung = false;
+        r.forcedBrand = rival;
+      }
+    };
+    for (const r of recs) demoteMislabeled(r, `${r.src || ''} ${r.href || ''}`.trim());
+
     // Competition analysis: classify every placement to a brand. The Samsung
     // flag stays authoritative for our own numbers (it uses per-site tuned
     // signals); brandOf covers the rest of the market.
     for (const r of recs) {
-      r.brand = r.samsung ? 'samsung' : brandOf(r.sig);
+      r.brand = r.samsung ? 'samsung' : r.forcedBrand || brandOf(r.sig);
       r.division = divisionOf(r.sig);
     }
 
@@ -1195,7 +1214,7 @@ async function countSamsungBanners(site) {
       const isRealUrl = s.url && !/^video:/i.test(s.url);
       const sig = [isRealUrl ? s.url : '', s.alt, s.href, s.caption].filter(Boolean).join(' ');
       const samsung = regex.test(sig);
-      return {
+      const rec = {
         key: (isRealUrl && normalizeUrl(s.url, site.bannerDedupe === 'image-query')) || normalizeUrl(s.href) || `slide#${i + 1}`,
         src: isRealUrl ? s.url : '',
         alt: s.alt || (s.caption || '').slice(0, 100),
@@ -1205,6 +1224,10 @@ async function countSamsungBanners(site) {
         brand: samsung ? 'samsung' : brandOf(sig),
         division: divisionOf(sig),
       };
+      // Same copy-vs-identity guard as the static records above.
+      demoteMislabeled(rec, `${isRealUrl ? s.url : ''} ${s.href || ''}`.trim());
+      if (rec.forcedBrand) rec.brand = rec.forcedBrand;
+      return rec;
     });
     // True slide order for next-arrow carousels: observation starts wherever
     // autoplay happens to be, and even the load-time anchor can be late
