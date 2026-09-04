@@ -186,6 +186,10 @@ const SITES = [
     devices: {
       url: 'https://www.xhawi.com/collections/omantel-store-collection',
       card: '.loadmore-item',
+      // Scroll-only: the grid infinite-scrolls, and its fallback "Load more"
+      // ANCHOR navigates to ?page=N which REPLACES the grid — clicking it
+      // after a slow lazy-load left runs sampling 24 of 121 devices.
+      expand: 'scroll',
       pages: 5,
     },
   },

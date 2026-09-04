@@ -108,12 +108,16 @@ async function expandOnce(page, cfg) {
   // their fallback "Load more" ANCHOR instead truly navigates and REPLACES
   // the grid (xhawi's ?page=N link did — Omantel kept sampling 24 of 121
   // devices because the click wiped out what the scroll had just loaded).
+  // cfg.expand 'scroll' = scroll is the ONLY expansion for this grid; wait
+  // out the lazy loader (xhawi sometimes takes >3s) and never risk the click.
+  const scrollPolls = cfg.expand === 'scroll' ? 16 : 6;
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < scrollPolls; i++) {
     await page.waitForTimeout(500);
     const now = await cardCount(page, cfg.card).catch(() => 0);
     if (now > before) return true;
   }
+  if (cfg.expand === 'scroll') return false;
 
   const clicked = await page
     .evaluate((sel) => {
